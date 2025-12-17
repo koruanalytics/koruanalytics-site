@@ -1,0 +1,23 @@
+project_name: "2026 EOM Peru - OSINT"
+
+data_paths:
+  raw: "data/raw"
+  interim: "data/interim"
+  processed: "data/processed"
+  geo: "data/geo"
+
+db:
+  duckdb_path: "data/osint_dw.duckdb"
+
+nlp:
+  default_language: "en"
+
+ops:
+  alerts_min_dedup_run_rows: 1
+
+incidents:
+  model_version: "baseline_rules_v1"
+
+geo:
+  gazetteer_path: "config/geo/peru_gazetteer_full.csv"
+  fuzzy_threshold: 0.82

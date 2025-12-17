@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+data/
+*.duckdb
+*.duckdb.wal
+.idea/
+.vscode/
+*.log
+_legacy/

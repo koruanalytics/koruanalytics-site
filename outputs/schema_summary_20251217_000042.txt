@@ -1,0 +1,25 @@
+Schema Summary - 20251217_000042
+==================================================
+
+TABLES:
+  curation_incident_overrides: 0 rows, 18 columns
+  curation_incident_overrides_backup: 0 rows, 28 columns
+  dim_places_pe: 1893 rows, 20 columns
+  dq_run_metrics: 16 rows, 5 columns
+  fct_incident_places: 18 rows, 7 columns
+  fct_incidents: 9 rows, 22 columns
+  fct_incidents_curated: 6 rows, 22 columns
+  incidents_test: 1 rows, 3 columns
+  map_incident_place: 9 rows, 5 columns
+  map_incident_place_v2: 18 rows, 14 columns
+  ops_alerts: 0 rows, 7 columns
+  ops_ingest_runs: 0 rows, 15 columns
+  stg_incident_place_candidates: 18 rows, 13 columns
+  stg_incidents_extracted: 9 rows, 22 columns
+  stg_news_dummy: 8 rows, 9 columns
+  stg_news_newsapi_ai: 84 rows, 28 columns
+  stg_news_newsapi_ai_dedup: 19 rows, 29 columns
+  stg_news_newsapi_ai_dedup_run: 3 rows, 29 columns
+
+VIEWS:
+  v_incidents_review_queue
