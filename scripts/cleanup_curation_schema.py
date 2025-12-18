@@ -100,7 +100,7 @@ def main() -> int:
         cols_sql = ", ".join([f'"{c}"' for c in keep_cols])
         
         con.execute(f"CREATE TABLE {table}_clean AS SELECT {cols_sql} FROM {table}")
-        clean_count = con.execute(f"SELECT COUNT(*) FROM {table}_clean").fetchone()[0]
+        con.execute(f"SELECT COUNT(*) FROM {table}_clean").fetchone()[0]
         
         # Swap tables
         con.execute(f"DROP TABLE {table}")

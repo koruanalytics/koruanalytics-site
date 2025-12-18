@@ -260,7 +260,7 @@ def main() -> int:
         # ---- 6) Write Markdown report
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         lines = []
-        lines.append(f"# OSINT Run Quality Report")
+        lines.append("# OSINT Run Quality Report")
         lines.append(f"- run_id: **{run_id}**")
         lines.append(f"- generated_at: `{now}`")
         lines.append("")

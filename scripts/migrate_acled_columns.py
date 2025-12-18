@@ -117,7 +117,7 @@ def update_incident_type_mapping(con: duckdb.DuckDBPyConnection, table: str) -> 
     
     updated = 0
     for old_type, new_type in mappings.items():
-        result = con.execute(f"""
+        con.execute(f"""
             UPDATE {table}
             SET incident_type = '{new_type}'
             WHERE incident_type = '{old_type}'

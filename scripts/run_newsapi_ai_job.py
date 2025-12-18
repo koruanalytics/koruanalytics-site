@@ -17,7 +17,6 @@ Features:
 from __future__ import annotations
 
 import argparse
-import subprocess
 import sys
 from datetime import date, timedelta
 from pathlib import Path
@@ -165,7 +164,7 @@ def main():
     # =========================================================================
     # STEP 1: INGESTION (Multi-Query)
     # =========================================================================
-    logger.info(f"[JOB] Starting multi-query ingestion v2")
+    logger.info("[JOB] Starting multi-query ingestion v2")
     logger.info(f"[JOB] Scope: {scope_path}")
     logger.info(f"[JOB] Date range: {start_date} to {end_date}")
     logger.info(f"[JOB] Max per group: {args.max_per_group}, Max total: {args.max_total}")
@@ -230,8 +229,8 @@ def main():
     # =========================================================================
     if not args.skip_load and interim_path:
         try:
-            load_result = run_dw_load(interim_path)
-            logger.info(f"[JOB] DW Load OK")
+            run_dw_load(interim_path)
+            logger.info("[JOB] DW Load OK")
         except Exception as ex:
             logger.error(f"[JOB] DW Load failed: {ex}")
             sys.exit(1)

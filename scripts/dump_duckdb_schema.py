@@ -159,7 +159,7 @@ def main() -> int:
         # Generate SQL dump
         sql_lines = []
         sql_lines.append("-- " + "=" * 60)
-        sql_lines.append(f"-- DuckDB Schema Dump")
+        sql_lines.append("-- DuckDB Schema Dump")
         sql_lines.append(f"-- Generated: {ts}")
         sql_lines.append(f"-- Database: {args.db}")
         sql_lines.append(f"-- Tables: {len(tables)}, Views: {len(views)}")
