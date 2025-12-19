@@ -177,12 +177,25 @@ def extract_api_category(category_labels: List[str] | None) -> Optional[str]:
     Returns:
         Primary category string or None
     """
-    if not category_labels:
+    # Handle None, empty list, or numpy/pandas arrays
+    if category_labels is None:
+        return None
+    
+    # Convert to list if it's a numpy array or similar
+    try:
+        if hasattr(category_labels, 'tolist'):
+            category_labels = category_labels.tolist()
+        if not isinstance(category_labels, list):
+            category_labels = list(category_labels) if category_labels else []
+    except (TypeError, ValueError):
+        return None
+    
+    if len(category_labels) == 0:
         return None
 
     # Take first category, remove "news/" prefix if present
     cat = category_labels[0] if category_labels else ""
-    if cat.startswith("news/"):
+    if cat and cat.startswith("news/"):
         cat = cat[5:]
     return cat if cat else None
 
@@ -197,12 +210,25 @@ def format_concept_labels(concept_labels: List[str] | None) -> Optional[str]:
     Returns:
         Semicolon-separated string or None
     """
-    if not concept_labels:
+    # Handle None, empty list, or numpy/pandas arrays
+    if concept_labels is None:
+        return None
+    
+    # Convert to list if it's a numpy array or similar
+    try:
+        if hasattr(concept_labels, 'tolist'):
+            concept_labels = concept_labels.tolist()
+        if not isinstance(concept_labels, list):
+            concept_labels = list(concept_labels) if concept_labels else []
+    except (TypeError, ValueError):
+        return None
+    
+    if len(concept_labels) == 0:
         return None
 
     # Limit to first 10 concepts to avoid very long strings
     labels = concept_labels[:10]
-    return "; ".join(labels) if labels else None
+    return "; ".join(str(l) for l in labels if l) if labels else None
 
 
 # =============================================================================
