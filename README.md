@@ -1,284 +1,235 @@
-# OSINT Peru 2026 - Sistema de Monitoreo de Incidentes
+# OSINT Peru 2026 - Electoral Monitoring Pipeline
 
-Sistema de inteligencia de fuentes abiertas (OSINT) para monitorear y clasificar incidentes de seguridad en Perú, enfocado en el contexto electoral 2026.
+Sistema de monitoreo OSINT para las elecciones de Perú 2026. Ingesta, procesa y clasifica noticias de fuentes abiertas para detectar incidentes de violencia política, protestas, crimen organizado y otros eventos relevantes.
 
 ## 🎯 Objetivo
 
-Automatizar la recolección, clasificación y geolocalización de noticias relacionadas con:
-- Violencia política y electoral
-- Protestas y manifestaciones
-- Crimen organizado
-- Terrorismo
-- Desastres naturales
-- Incidentes de seguridad
+Monitorear el entorno de seguridad electoral en Perú mediante:
+- Ingesta automatizada de noticias (NewsAPI.ai)
+- Clasificación ACLED de incidentes
+- Geo-parsing a nivel distrito
+- Generación de reportes diarios
 
-## 📊 Pipeline de Datos
+## 🏗️ Arquitectura
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                           OSINT PERU 2026 PIPELINE                          │
-└─────────────────────────────────────────────────────────────────────────────┘
-
-┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
-│   INGESTA    │───▶│ NORMALIZAR   │───▶│   CARGAR     │───▶│  DEDUPLICAR  │
-│  NewsAPI.ai  │    │   Parquet    │    │   DuckDB     │    │   Global     │
-└──────────────┘    └──────────────┘    └──────────────┘    └──────────────┘
-       │                                                            │
-       ▼                                                            ▼
-┌──────────────┐    ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
-│   EXTRAER    │◀───│  CLASIFICAR  │◀───│  RESOLVER    │◀───│   LUGARES    │
-│  Incidentes  │    │    ACLED     │    │    GEO       │    │  Candidatos  │
-└──────────────┘    └──────────────┘    └──────────────┘    └──────────────┘
-       │
-       ▼
-┌──────────────┐    ┌──────────────┐
-│    CURAR     │───▶│  DASHBOARD   │
-│   Manual     │    │  Streamlit   │
-└──────────────┘    └──────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                         OSINT Pipeline v2                           │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  ┌──────────┐   ┌───────────┐   ┌──────────┐   ┌────────────────┐  │
+│  │ NewsAPI  │──▶│ Normalize │──▶│  DuckDB  │──▶│ Daily Report   │  │
+│  │   .ai    │   │ (Parquet) │   │   DW     │   │   (Excel)      │  │
+│  └──────────┘   └───────────┘   └──────────┘   └────────────────┘  │
+│       │                              │                              │
+│       │                              ▼                              │
+│       │         ┌─────────────────────────────────┐                │
+│       │         │     stg_news_newsapi_ai         │                │
+│       │         │     stg_news_newsapi_ai_dedup   │                │
+│       │         │     stg_incidents_extracted     │                │
+│       │         │     fct_incidents               │                │
+│       │         │     fct_daily_report  ◀── NEW   │                │
+│       │         │     dim_places_pe               │                │
+│       │         └─────────────────────────────────┘                │
+│       │                                                            │
+│       ▼                                                            │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │ API Enrichment Fields (Fase 1):                              │  │
+│  │ • source_title (El Comercio, RPP)                            │  │
+│  │ • api_category (Politics, Crime)                             │  │
+│  │ • api_location (Lima, Arequipa)                              │  │
+│  │ • concept_labels (entidades: personas, orgs, lugares)        │  │
+│  │ • is_duplicate                                               │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-## 🏗️ Estructura del Proyecto
+## 📁 Estructura del Proyecto
 
 ```
 2026_Peru/
-├── config/                     # Configuración
-│   ├── newsapi_scope_peru.yaml # Scope de búsqueda (grupos, keywords, concepts)
-│   ├── settings.yaml           # Configuración general
-│   └── geo/                    # Gazetteer de Perú
-│       ├── peru_gazetteer_full.parquet
-│       └── peru_gazetteer_full.csv
-│
-├── src/                        # Código fuente
-│   ├── ingestion/              # Ingesta de datos
-│   │   └── newsapi_ai_ingest.py    # Multi-query ingestion
-│   ├── processing/             # Procesamiento
-│   │   ├── normalize_newsapi_ai.py # JSON → Parquet
-│   │   ├── load_newsapi_ai_to_dw.py # Parquet → DuckDB
-│   │   └── dedupe_newsapi_ai_in_duckdb.py
-│   ├── incidents/              # Extracción de incidentes
-│   │   ├── acled_rules.py      # Clasificación ACLED
-│   │   ├── extract_baseline.py # Extracción con LLM
-│   │   └── rules.py            # Reglas de clasificación
-│   ├── geoparse/               # Geolocalización
-│   │   ├── extract_locations.py
-│   │   └── resolve_places.py   # Nominatim + Gazetteer
-│   ├── db/                     # Base de datos
-│   │   └── schema.py           # DDL de todas las tablas
-│   ├── ops/                    # Operaciones
-│   │   ├── runs.py             # Gestión de runs
-│   │   └── alerts.py           # Alertas
-│   └── utils/                  # Utilidades
-│       ├── config.py
-│       └── dq_checks.py        # Data quality
-│
-├── scripts/                    # Scripts ejecutables
-│   ├── run_newsapi_ai_job.py   # ⭐ Runner principal
-│   ├── run_location_candidates.py
-│   ├── run_geo_resolve_incidents.py
-│   ├── run_incidents_job.py
-│   ├── build_fct_incidents.py
-│   └── compute_run_quality_metrics.py
-│
-├── data/                       # Datos (no versionado)
-│   ├── raw/newsapi_ai/         # JSON crudo
-│   ├── interim/newsapi_ai/     # Parquet normalizado
-│   └── osint_dw.duckdb         # Data warehouse
-│
-├── dashboards/streamlit/       # Visualización
-│   └── app_basic.py
-│
-├── tests/                      # Tests
-│   ├── test_config.py
-│   ├── test_duckdb.py
-│   └── integration/
-│
-├── docs/                       # Documentación
-│   ├── README_GEO.md
-│   ├── README_scripts.md
-│   └── schema_duckdb.txt
-│
-└── _legacy/                    # Código archivado (no versionado)
+├── config/
+│   ├── settings.yaml              # Configuración general
+│   └── newsapi_scope_peru.yaml    # Scope de búsqueda (12 grupos temáticos)
+├── data/
+│   ├── raw/newsapi_ai/            # JSON crudo del API
+│   ├── interim/newsapi_ai/        # Parquet normalizado
+│   ├── osint_dw.duckdb            # Data Warehouse
+│   └── daily_report.xlsx          # Reporte exportado
+├── scripts/
+│   ├── run_newsapi_ai_job.py      # Pipeline principal
+│   ├── build_fct_daily_report.py  # Genera reportes diarios
+│   ├── run_incident_extract_baseline.py
+│   └── migrate_add_api_fields.py  # Migración de BD
+├── src/
+│   ├── ingestion/                 # Ingesta de NewsAPI.ai
+│   ├── processing/                # Normalización, carga, dedupe
+│   ├── incidents/                 # Extracción y clasificación ACLED
+│   ├── geo/                       # Geo-parsing
+│   └── db/                        # Schema y DDL
+└── docs/
+    └── ARCHITECTURE.md
 ```
 
-## 🚀 Instalación
+## 🚀 Quickstart
 
-```bash
-# Clonar repositorio
-git clone <repo-url>
-cd 2026_Peru
-
-# Crear entorno virtual
-python -m venv .venv
-.venv\Scripts\activate  # Windows
-source .venv/bin/activate  # Linux/Mac
-
-# Instalar dependencias
-pip install -r requirements.txt
-
-# Configurar variables de entorno
-copy env.example .env
-# Editar .env con tu API key de NewsAPI.ai
-```
-
-## 📖 Uso
-
-### Ingesta diaria (comando principal)
-
-```bash
-# Ejecutar ingesta completa
-python scripts/run_newsapi_ai_job.py \
-    --scope config/newsapi_scope_peru.yaml \
-    --date-start 2025-12-17 \
-    --date-end 2025-12-18 \
-    --max-total 200
-
-# Solo ingesta (sin normalizar/cargar)
-python scripts/run_newsapi_ai_job.py \
-    --scope config/newsapi_scope_peru.yaml \
-    --skip-normalize --skip-load --skip-dedupe
-
-# Filtrar por prioridad
-python scripts/run_newsapi_ai_job.py \
-    --scope config/newsapi_scope_peru.yaml \
-    --priority 1 2  # Solo grupos prioritarios
-```
-
-### Pipeline completo (Block H)
-
-```bash
-# Ejecuta: location_candidates → geo_resolve → incidents
-python scripts/run_block_h_job.py --run-id 20251217235651
-```
-
-### Scripts individuales
-
-```bash
-# Geo-resolución de incidentes
-python scripts/run_geo_resolve_incidents.py --run-id <RUN_ID>
-
-# Extraer candidatos de lugares
-python scripts/run_location_candidates.py --run-id <RUN_ID>
-
-# Construir tabla de hechos
-python scripts/build_fct_incidents.py
-```
-
-## 📊 Modelo de Datos (DuckDB)
-
-### Tablas principales
-
-| Tabla | Descripción |
-|-------|-------------|
-| `stg_news_newsapi_ai` | Noticias crudas de NewsAPI.ai |
-| `stg_news_newsapi_ai_dedup` | Noticias deduplicadas |
-| `stg_incidents_extracted` | Incidentes extraídos con LLM |
-| `map_incident_place` | Mapeo incidente → lugar resuelto |
-| `dim_places_pe` | Gazetteer de Perú |
-| `fct_incidents` | Tabla de hechos de incidentes |
-| `fct_incidents_curated` | Incidentes curados manualmente |
-
-### Clasificación ACLED
-
-Los incidentes se clasifican según taxonomía ACLED:
-- **event_type**: Battles, Explosions, Protests, Riots, Violence against civilians, Strategic developments
-- **sub_event_type**: 25 subtipos específicos
-- **actor1/actor2**: Actores involucrados
-
-## ⚙️ Configuración
-
-### Scope YAML (config/newsapi_scope_peru.yaml)
-
-```yaml
-scope:
-  name: peru_2026
-  country: Peru
-  source_locations:
-    - "http://en.wikipedia.org/wiki/Peru"
-
-concept_groups:
-  elections:
-    priority: 1
-    acled_event_type: Strategic developments
-    concepts:
-      - "http://en.wikipedia.org/wiki/Elections_in_Peru"
-    keywords:
-      - elecciones peru 2026
-      - candidato presidencial
-
-  political_violence:
-    priority: 1
-    acled_event_type: Violence against civilians
-    concepts:
-      - "http://en.wikipedia.org/wiki/Political_violence"
-    keywords:
-      - violencia politica
-      - atentado
-```
-
-### Variables de entorno (.env)
-
-```bash
-NEWSAPI_AI_KEY=your-api-key-here
-DUCKDB_PATH=data/osint_dw.duckdb
-LOG_LEVEL=INFO
-```
-
-## 🧪 Testing
-
-```bash
-# Ejecutar todos los tests
-pytest tests/
-
-# Tests específicos
-pytest tests/test_config.py -v
-pytest tests/integration/ -v
-
-# Con cobertura
-pytest --cov=src tests/
-```
-
-## 📈 Métricas de Calidad
-
-```bash
-# Ver métricas del último run
-python scripts/compute_run_quality_metrics.py --run-id <RUN_ID>
-```
-
-Métricas incluidas:
-- Artículos por grupo temático
-- Tasa de deduplicación
-- Cobertura geográfica
-- Incidentes extraídos vs clasificados
-
-## 🗓️ Ejecución Programada
-
-### Windows Task Scheduler
+### 1. Instalar dependencias
 
 ```powershell
-# Registrar tarea diaria a las 6:00 AM
-.\scripts\register_newsapi_tasks.ps1
+pip install -r requirements.txt
+pip install sumy openpyxl
+python -c "import nltk; nltk.download('punkt')"
 ```
 
-### Cron (Linux)
+### 2. Configurar API key
 
-```bash
-0 6 * * * cd /path/to/2026_Peru && .venv/bin/python scripts/run_newsapi_ai_job.py --scope config/newsapi_scope_peru.yaml
+```powershell
+# En config/settings.yaml o variable de entorno
+$env:NEWSAPI_AI_KEY = "tu-api-key"
 ```
 
-## 📝 Changelog
+### 3. Ejecutar pipeline completo
 
-### v2.0.0 (2025-12-18)
-- ✨ Multi-query ingestion con grupos temáticos
-- ✨ Clasificación ACLED integrada
-- ✨ Deduplicación cross-group y global
-- 🔧 Consolidación de estructura del proyecto
-- 📚 Documentación actualizada
+```powershell
+# Ingesta + Normalización + Dedupe + Extracción de incidentes
+python scripts/run_newsapi_ai_job.py --scope config/newsapi_scope_peru.yaml --date-start 2025-12-18 --max-total 50
+```
+
+### 4. Generar reporte diario
+
+```powershell
+# Construir fct_daily_report con resúmenes
+python scripts/build_fct_daily_report.py --days 7
+```
+
+### 5. Exportar a Excel
+
+```powershell
+python -c "import duckdb; con=duckdb.connect('data/osint_dw.duckdb'); df=con.execute('SELECT * FROM fct_daily_report ORDER BY incident_date DESC').fetchdf(); df.to_excel('data/daily_report.xlsx', index=False); print(f'Exportado: {len(df)} filas')"
+```
+
+## 📊 Tablas Principales
+
+### `stg_incidents_extracted`
+
+Incidentes extraídos con clasificación ACLED y campos del API.
+
+| Campo | Descripción |
+|-------|-------------|
+| incident_id | ID único (SHA1 del URI) |
+| incident_type | Tipo ACLED (6 tipos) |
+| sub_event_type | Subtipo ACLED (25 tipos) |
+| disorder_type | political_violence, demonstrations, strategic_developments |
+| source_title | Nombre del medio (El Comercio, RPP) |
+| api_category | Categoría del API (Politics, Crime) |
+| api_location | Ubicación detectada por API |
+| concept_labels | Entidades: "Keiko Fujimori; JNE; Lima" |
+| adm1, adm2, adm3 | Departamento, Provincia, Distrito |
+| lat, lon | Coordenadas |
+
+### `fct_daily_report`
+
+Tabla optimizada para reportes diarios con resúmenes automáticos.
+
+| Campo | Descripción |
+|-------|-------------|
+| incident_date | Fecha del incidente |
+| source_title | Nombre del medio |
+| location_display | "Miraflores, Lima, Lima" |
+| event_type | Tipo ACLED |
+| title | Título del artículo |
+| summary_es | Resumen en español (2 oraciones, sumy LSA) |
+| url | Link al artículo original |
+| concept_labels | Entidades mencionadas |
+
+## 🔍 Clasificación ACLED
+
+El sistema clasifica incidentes según la metodología ACLED:
+
+### Tipos de Evento (6)
+- `battles` - Enfrentamientos armados
+- `explosions_remote_violence` - Explosiones, ataques remotos
+- `violence_against_civilians` - Asesinatos, secuestros
+- `protests` - Manifestaciones pacíficas
+- `riots` - Disturbios, vandalismo
+- `strategic_developments` - Arrestos, acuerdos
+
+### Tipos de Desorden (3)
+- `political_violence` - Violencia política
+- `demonstrations` - Protestas y manifestaciones
+- `strategic_developments` - Desarrollos estratégicos
+
+## 📋 Grupos Temáticos (Scope)
+
+El archivo `newsapi_scope_peru.yaml` define 12 grupos de búsqueda:
+
+| Grupo | Prioridad | Descripción |
+|-------|-----------|-------------|
+| elections | 1 | Elecciones, JNE, ONPE, candidatos |
+| political_violence | 1 | Asesinatos políticos, amenazas |
+| protests | 1 | Marchas, manifestaciones |
+| terrorism | 1 | Sendero Luminoso, VRAEM |
+| organized_crime | 2 | Narcotráfico, extorsión |
+| security_forces | 2 | PNP, FFAA, operativos |
+| violent_crimes | 2 | Homicidios, sicariato |
+| infrastructure | 2 | Bloqueos, sabotaje |
+| explosions | 3 | Bombas, atentados |
+| disasters | 3 | Emergencias, desastres |
+| accidents | 3 | Accidentes de tránsito |
+| health | 3 | Epidemias, salud pública |
+
+## 🛠️ Comandos Útiles
+
+```powershell
+# Pipeline con fechas específicas
+python scripts/run_newsapi_ai_job.py --scope config/newsapi_scope_peru.yaml --date-start 2025-12-01 --date-end 2025-12-15 --max-total 100
+
+# Solo grupos prioritarios
+python scripts/run_newsapi_ai_job.py --scope config/newsapi_scope_peru.yaml --priority 1 2 --max-total 50
+
+# Reconstruir todos los reportes
+python scripts/build_fct_daily_report.py --rebuild-all
+
+# Reporte de una fecha específica
+python scripts/build_fct_daily_report.py --date 2025-12-18
+
+# Ver estadísticas de la BD
+python -c "import duckdb; con=duckdb.connect('data/osint_dw.duckdb'); print(con.execute('SELECT table_name, estimated_size FROM duckdb_tables()').fetchdf())"
+```
+
+## 📈 Métricas del Pipeline
+
+El job muestra métricas al finalizar:
+
+```
+[JOB] COMPLETE: run_id=20251219125550 ingested=13 new=2 incidents=2
+[JOB] Enrichment: source_title=2/2, category=0/2, location=2/2, concepts=2/2
+```
+
+- `ingested`: Artículos descargados
+- `new`: Artículos nuevos (no duplicados históricos)
+- `incidents`: Incidentes extraídos
+- `Enrichment`: Cobertura de campos del API
+
+## 🗓️ Changelog
+
+### Fase 2 (2025-12-19)
+- ✅ `fct_daily_report` con resúmenes automáticos (sumy LSA)
+- ✅ Exportación a Excel
+- ✅ Soporte para `--days`, `--date`, `--rebuild-all`
+
+### Fase 1 (2025-12-18)
+- ✅ Campos de enriquecimiento del API (source_title, api_category, concept_labels, etc.)
+- ✅ Fix dedupe: crear `_dedup` (global) y `_dedup_run` (por run)
+- ✅ Extracción de incidentes integrada en pipeline principal
+- ✅ Quality checks mejorados
 
 ## 📄 Licencia
 
-Proyecto privado - Koru Analytics
+Proyecto interno - Koru Analytics
 
 ## 👥 Contacto
 
-- **Autor**: Carlos
-- **Organización**: Koru Analytics
+- Proyecto: OSINT Peru 2026
+- Organización: Koru Analytics
