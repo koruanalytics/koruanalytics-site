@@ -318,6 +318,9 @@ def build_daily_report(
         con.execute("DELETE FROM fct_daily_report WHERE ingest_run_id = ?", [run_id])
     elif target_date:
         con.execute("DELETE FROM fct_daily_report WHERE incident_date = ?", [target_date])
+    elif days:
+        start_date = date.today() - timedelta(days=days)
+        con.execute("DELETE FROM fct_daily_report WHERE incident_date >= ?", [start_date])
     elif rebuild_all:
         con.execute("DELETE FROM fct_daily_report")
     
