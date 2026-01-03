@@ -237,6 +237,42 @@ def extract_number_from_match(match: str) -> int:
     return num if num else 0
 
 
+# =============================================================================
+# FILTROS PARA EVITAR FALSOS POSITIVOS
+# =============================================================================
+
+def is_false_positive_context(text: str) -> bool:
+    """Detecta contextos que generan falsos positivos (sismos, estadísticas)."""
+    import re
+    text_lower = text.lower()
+    
+    # Excluir sismos/terremotos con datos técnicos
+    if any(word in text_lower for word in ['sismo', 'temblor', 'terremoto', 'magnitud', 'richter']):
+        if re.search(r'magnitud\s+[\d,\.]+|profundidad|epicentro|\d+\s*km', text_lower):
+            return True
+    
+    # Excluir estadísticas anuales
+    if re.search(r'(?:en|año|durante)\s+20\d{2}.*?(?:increment|aument|estadística|total|cifra|acumulad)', text_lower):
+        return True
+    if re.search(r'(?:increment|aument).*?(?:en|año|durante)\s+20\d{2}', text_lower):
+        return True
+    
+    # Excluir videos en vivo
+    if any(word in text_lower for word in ['envivo', 'en vivo', 'video:']):
+        return True
+    
+    return False
+
+
+def clean_text_for_extraction(text: str) -> str:
+    """Limpia el texto eliminando datos técnicos que causan falsos positivos."""
+    import re
+    text = re.sub(r'magnitud\s+[\d,\.]+', 'magnitud X', text, flags=re.IGNORECASE)
+    text = re.sub(r'(\d+)\s*(?:km|kilómetros?)\s*(?:de\s+)?(?:profundidad)?', 'X km', text, flags=re.IGNORECASE)
+    text = re.sub(r'\b(19|20)\d{2}\b(?!\s*(?:muert|fallec|herid|víctima))', 'YEAR', text)
+    return text
+
+
 def extract_casualties(title: str, body: str = "") -> dict:
     """
     Extrae número de muertos y heridos del título y cuerpo.
@@ -248,9 +284,16 @@ def extract_casualties(title: str, body: str = "") -> dict:
     Returns:
         dict con 'deaths' y 'injuries' (int o None)
     """
-    text = f"{title or ''} {body or ''}".lower()
+    full_text = f"{title or ''} {body or ''}"
     
-    # Normalizar texto
+    # Verificar si es contexto de falso positivo
+    if is_false_positive_context(full_text):
+        # Solo usar el título para evitar falsos positivos del body
+        text = (title or '').lower()
+    else:
+        # Limpiar texto para eliminar datos técnicos
+        text = clean_text_for_extraction(full_text).lower()
+    
     text = re.sub(r'\s+', ' ', text)
     
     deaths = 0
@@ -261,7 +304,7 @@ def extract_casualties(title: str, body: str = "") -> dict:
         matches = re.findall(pattern, text, re.IGNORECASE)
         for match in matches:
             num = extract_number_from_match(match)
-            if num > deaths:
+            if num > deaths and num < 1000:  # Limitar a números razonables
                 deaths = num
     
     # =========================================================================
