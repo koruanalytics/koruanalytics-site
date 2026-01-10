@@ -1,0 +1,225 @@
+# =============================================================================
+# NewsAPI.ai Scope Configuration - Peru Elections 2026 v6.2
+# =============================================================================
+# STRATEGY: source_keywords_by_group
+# 
+# CHANGES v6.2:
+# - Consolidated violencia_politica into single effective group
+# - Added violencia_sexual group
+# - Optimized keywords for better coverage
+# - Each group has ≤15 WORDS total
+#
+# API LIMIT: NewsAPI.ai allows max 15 WORDS per query (not keywords!)
+# =============================================================================
+
+generated_at_utc: '2026-01-09T08:00:00Z'
+provider: newsapi.ai (EventRegistry)
+version: '6.2'
+strategy: source_keywords_by_group
+
+# =============================================================================
+# PERUVIAN SOURCES (common for all groups)
+# =============================================================================
+source_uris:
+  - elcomercio.pe
+  - larepublica.pe
+  - diariocorreo.pe
+  - andina.pe
+  - gestion.pe
+  - rpp.pe
+  - ojo.pe
+
+# =============================================================================
+# KEYWORD GROUPS (each ≤15 WORDS total)
+# =============================================================================
+
+keyword_groups:
+
+  # -------------------------------------------------------------------------
+  # GROUP 1: ELECTORAL - 14 words
+  # -------------------------------------------------------------------------
+  - group_id: electoral
+    label: Electoral Process 2026
+    priority: 1
+    keywords:
+      - elecciones
+      - electoral
+      - candidato
+      - candidata
+      - JNE
+      - ONPE
+      - voto
+      - votacion
+      - comicios
+      - campaña
+      - fraude
+      - padron
+      - presidencial
+      - congresista
+
+  # -------------------------------------------------------------------------
+  # GROUP 2: POLITICAL VIOLENCE - 15 words (single words for broader match)
+  # -------------------------------------------------------------------------
+  - group_id: violencia_politica
+    label: Political Violence
+    priority: 1
+    keywords:
+      - alcalde asesinado
+      - alcalde amenazado
+      - regidor asesinado
+      - candidato asesinado
+      - candidato amenazado
+      - congresista asesinado
+      - funcionario asesinado
+
+  # -------------------------------------------------------------------------
+  # GROUP 3: COMMON VIOLENCE - 15 words
+  # -------------------------------------------------------------------------
+  - group_id: violencia_comun
+    label: Violent Crime
+    priority: 1
+    keywords:
+      - asesinato
+      - homicidio
+      - sicariato
+      - sicario
+      - feminicidio
+      - secuestro
+      - extorsion
+      - balacera
+      - tiroteo
+      - baleado
+      - asalto
+      - crimen
+      - criminal
+      - herido
+      - muerto
+
+  # -------------------------------------------------------------------------
+  # GROUP 4: SEXUAL VIOLENCE - 15 words (NEW)
+  # -------------------------------------------------------------------------
+  - group_id: violencia_sexual
+    label: Sexual Violence
+    priority: 1
+    keywords:
+      - violacion
+      - violador
+      - abuso sexual
+      - acoso sexual
+      - tocamientos
+      - feminicidio
+      - trata personas
+      - prostitucion
+      - pedofilia
+      - agresion sexual
+
+  # -------------------------------------------------------------------------
+  # GROUP 5: PROTESTS - 15 words
+  # -------------------------------------------------------------------------
+  - group_id: protestas
+    label: Protests and Riots
+    priority: 1
+    keywords:
+      - protesta
+      - manifestacion
+      - paro
+      - huelga
+      - bloqueo
+      - disturbios
+      - enfrentamiento
+      - manifestantes
+      - movilizacion
+      - vandalismo
+      - saqueo
+      - marcha
+      - planton
+      - conflicto
+      - carretera
+
+  # -------------------------------------------------------------------------
+  # GROUP 6: TERRORISM - 14 words
+  # -------------------------------------------------------------------------
+  - group_id: terrorismo
+    label: Terrorism
+    priority: 1
+    keywords:
+      - terrorismo
+      - terrorista
+      - senderista
+      - VRAEM
+      - narcoterrorismo
+      - atentado
+      - explosivo
+      - emboscada
+      - subversivo
+      - Sendero
+      - Luminoso
+      - bomba
+      - dinamita
+      - detonacion
+
+  # -------------------------------------------------------------------------
+  # GROUP 7: NATURAL DISASTERS - 15 words
+  # -------------------------------------------------------------------------
+  - group_id: desastres_naturales
+    label: Natural Disasters
+    priority: 2
+    keywords:
+      - terremoto
+      - sismo
+      - temblor
+      - inundacion
+      - huayco
+      - deslizamiento
+      - derrumbe
+      - aluvion
+      - sequia
+      - helada
+      - friaje
+      - nevada
+      - granizada
+      - tsunami
+      - emergencia
+
+  # -------------------------------------------------------------------------
+  # GROUP 8: ACCIDENTS - 15 words
+  # -------------------------------------------------------------------------
+  - group_id: accidentes
+    label: Accidents
+    priority: 2
+    keywords:
+      - accidente
+      - choque
+      - volcadura
+      - atropello
+      - incendio
+      - explosion
+      - colision
+      - despiste
+      - naufragio
+      - ahogado
+      - electrocutado
+      - tragedia
+      - victimas
+      - heridos
+      - fallecidos
+
+# =============================================================================
+# QUERY CONFIGURATION
+# =============================================================================
+query_config:
+  langs:
+    - spa
+    - eng
+  max_per_group: 80
+  max_total: 500
+  sort_by: date
+  dedupe_by: uri
+
+# =============================================================================
+# GEOGRAPHIC SCOPE
+# =============================================================================
+scope:
+  location_uri: http://en.wikipedia.org/wiki/Peru
+  country: Peru
+  country_code: PE

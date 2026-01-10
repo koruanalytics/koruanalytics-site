@@ -9,3 +9,12 @@ data/
 .vscode/
 *.log
 _legacy/
+
+# Temporary audit files
+_audit_packages_full.txt
+
+# Claude download folder (intermediate files)
+.download/
+
+# Zip exports
+*.zip

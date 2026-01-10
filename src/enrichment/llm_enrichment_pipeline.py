@@ -1,0 +1,1303 @@
+"""
+src/enrichment/llm_enrichment_pipeline.py
+
+Pipeline de enriquecimiento LLM para arquitectura Medallion:
+- Lee de bronze_news (raw)
+- Enriquece con LLM (clasificación, víctimas, geo, actores)
+- Escribe a silver_news_enriched
+- Promueve relevantes a gold_incidents (con filtros de calidad)
+- Genera gold_daily_stats
+
+Filtros de calidad integrados:
+- Excluye artículos internacionales (sin ubicación en Perú)
+- Excluye artículos de resumen/estadísticas agregadas
+- Excluye conmemoraciones (no incidentes nuevos)
+- Excluye no_relevante
+
+Uso:
+    python -m src.enrichment.llm_enrichment_pipeline --process-new 100
+    python -m src.enrichment.llm_enrichment_pipeline --build-gold
+    python -m src.enrichment.llm_enrichment_pipeline --full 100
+    python -m src.enrichment.llm_enrichment_pipeline --clean-gold
+    python -m src.enrichment.llm_enrichment_pipeline --status
+    python -m src.enrichment.llm_enrichment_pipeline --validate-schema
+
+Last updated: 2026-01-09
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+from datetime import datetime, date
+from typing import Optional, List, Dict, Any
+from dataclasses import dataclass
+
+import duckdb
+from dotenv import load_dotenv
+from loguru import logger
+
+load_dotenv()
+
+# =============================================================================
+# CONFIGURACIÓN
+# =============================================================================
+
+DB_PATH = "data/osint_dw.duckdb"
+DEFAULT_MODEL = "claude-3-5-haiku-20241022"
+BATCH_SIZE = 20  # Artículos por batch para mostrar progreso
+
+# Umbrales para detección de artículos de resumen
+UMBRAL_MUERTOS_SOSPECHOSO = 15  # Más de 15 muertos requiere validación
+UMBRAL_HERIDOS_SOSPECHOSO = 80  # Más de 80 heridos requiere validación
+
+# Tipos de evento válidos (para validación)
+TIPOS_EVENTO_VALIDOS = {
+    'violencia_armada', 'crimen_violento', 'violencia_sexual', 'secuestro',
+    'feminicidio', 'extorsion', 'accidente_grave', 'desastre_natural',
+    'protesta', 'disturbio', 'terrorismo', 'crimen_organizado',
+    'violencia_politica', 'operativo_seguridad', 'no_relevante'
+}
+
+
+# =============================================================================
+# PROMPT DE ENRIQUECIMIENTO MEJORADO
+# =============================================================================
+
+ENRICHMENT_PROMPT = """Eres un analista de seguridad especializado en Perú. Analiza esta noticia y extrae información estructurada.
+
+CATEGORÍAS DE EVENTOS (usa exactamente estos valores):
+- violencia_armada: Enfrentamientos, tiroteos, balaceras, ataques con armas
+- crimen_violento: Asesinatos, homicidios, sicariato, agresiones graves
+- violencia_sexual: Violaciones, abuso sexual, acoso sexual grave
+- secuestro: Secuestros, desapariciones forzadas, raptos
+- feminicidio: Asesinato de mujeres por razón de género
+- extorsion: Extorsión, cobro de cupos, amenazas por dinero
+- accidente_grave: Accidentes de tránsito/laborales con víctimas
+- desastre_natural: Sismos, inundaciones, huaycos, deslizamientos
+- protesta: Marchas, manifestaciones, paros, huelgas
+- disturbio: Disturbios, vandalismo, saqueos
+- terrorismo: Ataques terroristas, Sendero Luminoso, VRAEM
+- crimen_organizado: Narcotráfico, bandas criminales organizadas
+- violencia_politica: Ataques/amenazas a candidatos, violencia electoral
+- operativo_seguridad: Detenciones, capturas, incautaciones importantes
+- no_relevante: Deportes, farándula, economía, política sin violencia
+
+CRITERIOS NO RELEVANTE:
+- Noticias de entretenimiento, farándula, celebridades
+- Deportes (excepto violencia en estadios)
+- Economía/negocios general (sin crimen)
+- Política internacional sin impacto directo en Perú
+- Horóscopo, tecnología general, ciencia
+
+CRITERIOS INTERNACIONAL (es_internacional = true):
+- Incidentes que ocurren FUERA de Perú (Colombia, Venezuela, EEUU, etc.)
+- Noticias sobre políticos/eventos de otros países sin víctimas peruanas
+- Operaciones militares/policiales de otros países
+- Aunque la fuente sea peruana, si el incidente NO ocurrió en Perú = internacional
+
+CRITERIOS ARTÍCULO DE RESUMEN (es_resumen = true):
+- Estadísticas anuales/mensuales ("en 2025 hubo X muertos", "incrementó en X%")
+- Balances o informes de un período ("total de crímenes en el año")
+- Conmemoraciones de eventos pasados ("recordará a las víctimas de...")
+- Rankings o comparativas históricas ("el año más letal para...")
+- Artículos de opinión/análisis sin incidente específico nuevo
+- Compilaciones de múltiples eventos ("los 10 casos más...")
+
+DEPARTAMENTOS DE PERÚ:
+Amazonas, Áncash, Apurímac, Arequipa, Ayacucho, Cajamarca, Callao, Cusco,
+Huancavelica, Huánuco, Ica, Junín, La Libertad, Lambayeque, Lima, Loreto,
+Madre de Dios, Moquegua, Pasco, Piura, Puno, San Martín, Tacna, Tumbes, Ucayali
+
+NOTICIA:
+Título: {title}
+Cuerpo: {body}
+Fuente: {source}
+
+Responde ÚNICAMENTE con JSON válido (sin markdown):
+{{
+    "es_relevante": true/false,
+    "es_internacional": true/false,
+    "es_resumen": true/false,
+    "tipo_evento": "categoria_exacta",
+    "subtipo": "descripción breve específica",
+    "muertos": número o null,
+    "heridos": número o null,
+    "departamento": "nombre exacto" o null,
+    "provincia": "nombre" o null,
+    "distrito": "nombre" o null,
+    "ubicacion_especifica": "lugar/dirección" o null,
+    "pais_evento": "Perú" o nombre del país donde ocurrió,
+    "actores": ["persona1", "persona2"] o [],
+    "organizaciones": ["org1", "org2"] o [],
+    "resumen_es": "resumen de 3-4 oraciones en español con los hechos principales",
+    "resumen_en": "summary in 3-4 sentences in English with the main facts",
+    "sentiment": "POS" o "NEG" o "NEU",
+    "confianza": 0.0-1.0
+}}"""
+
+
+# =============================================================================
+# CLIENTE LLM
+# =============================================================================
+
+class LLMClient:
+    """Cliente para llamadas a LLM."""
+    
+    def __init__(self, model: str = DEFAULT_MODEL):
+        self.model = model
+        self.total_tokens_in = 0
+        self.total_tokens_out = 0
+        self._init_client()
+    
+    def _init_client(self):
+        from anthropic import Anthropic
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise ValueError("ANTHROPIC_API_KEY no encontrada")
+        self.client = Anthropic(api_key=api_key)
+    
+    def enrich_article(self, title: str, body: str, source: str) -> Dict[str, Any]:
+        """Enriquece un artículo con LLM."""
+        prompt = ENRICHMENT_PROMPT.format(
+            title=title,
+            body=(body or "")[:3000],  # Limitar body
+            source=source or "Desconocido"
+        )
+        
+        try:
+            response = self.client.messages.create(
+                model=self.model,
+                max_tokens=700,  # Aumentado para nuevos campos
+                messages=[{"role": "user", "content": prompt}]
+            )
+            
+            raw = response.content[0].text
+            self.total_tokens_in += response.usage.input_tokens
+            self.total_tokens_out += response.usage.output_tokens
+            
+            # Parsear JSON
+            result = self._parse_json(raw)
+            result["_tokens_in"] = response.usage.input_tokens
+            result["_tokens_out"] = response.usage.output_tokens
+            result["_model"] = self.model
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error LLM: {e}")
+            return {"error": str(e), "es_relevante": False}
+    
+    def _parse_json(self, raw: str) -> Dict[str, Any]:
+        """Parsea JSON de respuesta LLM."""
+        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        raw = raw.strip()
+        return json.loads(raw)
+    
+    def get_stats(self) -> Dict[str, Any]:
+        """Retorna estadísticas de uso."""
+        cost = (self.total_tokens_in / 1_000_000 * 0.25 + 
+                self.total_tokens_out / 1_000_000 * 1.25)
+        return {
+            "tokens_in": self.total_tokens_in,
+            "tokens_out": self.total_tokens_out,
+            "cost_usd": round(cost, 4)
+        }
+
+
+# =============================================================================
+# VALIDADORES DE CALIDAD (MEJORADOS)
+# =============================================================================
+
+class QualityValidator:
+    """Validadores para filtrar artículos problemáticos."""
+    
+    # Patrones para detectar artículos de resumen (AMPLIADOS)
+    RESUMEN_PATTERNS = [
+        # Temporales
+        r'en (?:el )?20\d{2}',  # "en 2025", "en el 2024"
+        r'durante (?:el )?20\d{2}',
+        r'(?:enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre) (?:de )?20\d{2}',
+        
+        # Balances y estadísticas (robustos a tildes)
+        r'balance (?:del )?(?:a[ñn]o|mes|semestre)',
+        r'estad[íi]sticas? (?:del )?(?:a[ñn]o|anuales?|mensuales?)',
+        r'increment[óo]? en \d+',
+        r'aument[óo]? en \d+',
+        r'se redujo en \d+',
+        r'total de \d+ (?:cr[íi]menes|muertos|v[íi]ctimas|casos|asesinatos|feminicidios)',
+        r'\d+ (?:muertos|v[íi]ctimas|asesinados|feminicidios) en (?:el )?20\d{2}',
+        
+        # Conmemoraciones (con y sin tildes)
+        r'recordar[áa]n? a (?:las )?v[íi]ctimas',
+        r'conmemoraci[óo]n',
+        r'aniversario',
+        r'homenaje a (?:las )?v[íi]ctimas',
+        r'en memoria de',
+        
+        # Rankings y comparativas (robustos a tildes)
+        r'(?:el )?a[ñn]o m[áa]s (?:letal|violento|mortal|sangriento)',
+        r'(?:el )?mes m[áa]s (?:letal|violento|mortal)',
+        r'\d+ a[ñn]os (?:de|despu[ée]s)',
+        r'los \d+ (?:casos|cr[íi]menes|asesinatos) m[áa]s',
+        r'ranking de',
+        r'lista de',
+        
+        # Informes
+        r'según (?:el )?(?:informe|reporte|estudio)',
+        r'de acuerdo (?:al|con el) (?:informe|reporte)',
+        r'reveló? que en 20\d{2}',
+        
+        # Opinión/análisis
+        r'análisis(?:\:| de)',
+        r'reflexión(?:\:| sobre)',
+        r'¿por qué (?:hay|existe|ocurre)',
+        r'las causas de',
+    ]
+    
+    # Países que indican noticia internacional
+    PAISES_INTERNACIONALES = [
+        'colombia', 'venezuela', 'ecuador', 'bolivia', 'chile', 'brasil',
+        'argentina', 'estados unidos', 'eeuu', 'ee.uu.', 'usa', 'méxico',
+        'nicaragua', 'el salvador', 'honduras', 'guatemala', 'panamá',
+        'cuba', 'españa', 'china', 'rusia', 'ucrania', 'israel', 'gaza',
+        'haiti', 'haití', 'república dominicana', 'puerto rico', 'costa rica'
+    ]
+    
+    # Patrones de títulos internacionales
+    PATRONES_INTERNACIONALES = [
+        r'en (?:ee\.?uu\.?|estados unidos|colombia|venezuela|ecuador|bolivia|chile|brasil|argentina)',
+        r'(?:maduro|petro|lula|biden|trump|milei|boric) ',
+        r'south pacific', r'pacific ocean', r'in brazil', r'in colombia',
+        r'(?:gobierno|presidente) (?:de |del? )(?:colombia|venezuela|eeuu|argentina)',
+    ]
+    
+    @classmethod
+    def es_probable_resumen(cls, titulo: str, cuerpo: str, muertos: int, heridos: int) -> bool:
+        """Detecta si un artículo es probablemente un resumen estadístico."""
+        texto = f"{titulo} {cuerpo or ''}".lower()
+        
+        # Buscar patrones de resumen
+        for pattern in cls.RESUMEN_PATTERNS:
+            if re.search(pattern, texto, re.IGNORECASE):
+                # Si además tiene muchas víctimas, muy probable resumen
+                if muertos and muertos > UMBRAL_MUERTOS_SOSPECHOSO:
+                    return True
+                if heridos and heridos > UMBRAL_HERIDOS_SOSPECHOSO:
+                    return True
+                # Si el patrón está en el título, más probable
+                if re.search(pattern, titulo.lower(), re.IGNORECASE):
+                    return True
+        
+        # Detectar compilaciones numéricas en título
+        if re.search(r'los \d+ ', titulo.lower()):
+            return True
+        
+        return False
+    
+    @classmethod
+    def es_probable_internacional(cls, titulo: str, cuerpo: str, departamento: str) -> bool:
+        """Detecta si un artículo es probablemente sobre un evento internacional."""
+        texto = f"{titulo} {cuerpo or ''}".lower()
+        titulo_lower = titulo.lower()
+        
+        # Si tiene departamento de Perú, NO es internacional
+        if departamento:
+            return False
+        
+        # Buscar patrones de internacionales en título
+        for pattern in cls.PATRONES_INTERNACIONALES:
+            if re.search(pattern, titulo_lower):
+                return True
+        
+        # Si no tiene departamento y menciona países extranjeros prominentemente
+        texto_inicial = f"{titulo} {(cuerpo or '')[:300]}".lower()
+        for pais in cls.PAISES_INTERNACIONALES:
+            if pais in texto_inicial:
+                # Verificar que no sea "peruano en [país]" o similar
+                if f'peruano en {pais}' not in texto_inicial and f'peruana en {pais}' not in texto_inicial:
+                    return True
+        
+        return False
+    
+    @classmethod
+    def validar_respuesta_llm(cls, enriched: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Valida y normaliza la respuesta del LLM.
+        Asegura consistencia entre es_relevante y tipo_evento.
+        """
+        # Normalizar es_relevante a booleano
+        es_relevante = enriched.get('es_relevante')
+        if es_relevante is None:
+            es_relevante = False
+        elif isinstance(es_relevante, str):
+            es_relevante = es_relevante.lower() in ('true', 'yes', 'si', 'sí', '1')
+        else:
+            es_relevante = bool(es_relevante)
+        
+        # Normalizar tipo_evento
+        tipo_evento = enriched.get('tipo_evento', 'no_relevante')
+        if tipo_evento is None or tipo_evento == '':
+            tipo_evento = 'no_relevante'
+        tipo_evento = tipo_evento.lower().strip()
+        
+        # Validar tipo_evento contra lista permitida
+        if tipo_evento not in TIPOS_EVENTO_VALIDOS:
+            logger.warning(f"tipo_evento inválido '{tipo_evento}', usando 'no_relevante'")
+            tipo_evento = 'no_relevante'
+        
+        # REGLA CRÍTICA: si tipo_evento es no_relevante, es_relevante debe ser False
+        if tipo_evento == 'no_relevante':
+            es_relevante = False
+        
+        # REGLA CRÍTICA: si es_relevante es False, tipo_evento debe ser no_relevante
+        # (solo si no hay tipo específico)
+        if not es_relevante and tipo_evento != 'no_relevante':
+            # LLM marcó como no relevante pero dio un tipo - confiar en el tipo
+            # Esto puede pasar cuando el LLM detecta un incidente pero considera que no es "relevante"
+            # En este caso, confiamos en el tipo y lo marcamos como relevante
+            logger.debug(f"Inconsistencia LLM: es_relevante=False pero tipo={tipo_evento}. Marcando como relevante.")
+            es_relevante = True
+        
+        enriched['es_relevante'] = es_relevante
+        enriched['tipo_evento'] = tipo_evento
+        
+        # Normalizar booleanos adicionales
+        for bool_field in ['es_internacional', 'es_resumen']:
+            val = enriched.get(bool_field)
+            if val is None:
+                enriched[bool_field] = False
+            elif isinstance(val, str):
+                enriched[bool_field] = val.lower() in ('true', 'yes', 'si', 'sí', '1')
+            else:
+                enriched[bool_field] = bool(val)
+        
+        # Normalizar numéricos
+        for num_field in ['muertos', 'heridos', 'confianza']:
+            val = enriched.get(num_field)
+            if val is not None:
+                try:
+                    enriched[num_field] = float(val) if num_field == 'confianza' else int(val)
+                except (ValueError, TypeError):
+                    enriched[num_field] = None
+        
+        return enriched
+    
+    @classmethod
+    def es_duplicado_evento(cls, titulo: str, eventos_recientes: List[str]) -> bool:
+        """Detecta si es un artículo duplicado sobre el mismo evento."""
+        titulo_norm = cls._normalizar_titulo(titulo)
+        
+        for evento in eventos_recientes:
+            evento_norm = cls._normalizar_titulo(evento)
+            # Si comparten más del 60% de palabras clave, probable duplicado
+            if cls._similitud_palabras(titulo_norm, evento_norm) > 0.6:
+                return True
+        
+        return False
+    
+    @staticmethod
+    def _normalizar_titulo(titulo: str) -> set:
+        """Normaliza título a conjunto de palabras clave."""
+        # Eliminar stopwords y normalizar
+        stopwords = {'el', 'la', 'los', 'las', 'de', 'del', 'en', 'a', 'por', 'para', 
+                     'con', 'sin', 'que', 'y', 'o', 'un', 'una', 'tras', 'ante'}
+        palabras = re.findall(r'\w+', titulo.lower())
+        return {p for p in palabras if p not in stopwords and len(p) > 2}
+    
+    @staticmethod
+    def _similitud_palabras(set1: set, set2: set) -> float:
+        """Calcula similitud de Jaccard entre dos conjuntos."""
+        if not set1 or not set2:
+            return 0.0
+        interseccion = len(set1 & set2)
+        union = len(set1 | set2)
+        return interseccion / union if union > 0 else 0.0
+
+
+# =============================================================================
+# PIPELINE PRINCIPAL
+# =============================================================================
+
+class EnrichmentPipeline:
+    """Pipeline de enriquecimiento Bronze → Silver → Gold."""
+    
+    def __init__(self, db_path: str = DB_PATH):
+        self.db_path = db_path
+        self.llm = LLMClient()
+    
+    def get_connection(self):
+        return duckdb.connect(self.db_path)
+    
+    # =========================================================================
+    # SCHEMA VALIDATION
+    # =========================================================================
+    
+    def validate_schema(self) -> Dict[str, Any]:
+        """
+        Validates that all required Medallion tables exist with correct columns.
+        Returns validation results.
+        """
+        con = self.get_connection()
+        results = {"tables": {}, "issues": [], "valid": True}
+        
+        required_tables = {
+            'bronze_news': ['incident_id', 'title', 'body', 'source_title', 'url', 'published_at'],
+            'silver_news_enriched': ['incident_id', 'bronze_id', 'es_relevante', 'es_internacional', 
+                                      'es_resumen', 'tipo_evento', 'muertos', 'heridos', 'departamento'],
+            'gold_incidents': ['incident_id', 'tipo_evento', 'fecha_incidente', 'muertos', 'heridos'],
+            'gold_daily_stats': ['fecha', 'total_incidentes', 'total_muertos', 'total_heridos'],
+        }
+        
+        for table, required_cols in required_tables.items():
+            try:
+                existing_cols = con.execute(f"""
+                    SELECT column_name FROM information_schema.columns 
+                    WHERE table_name = '{table}'
+                """).fetchdf()['column_name'].tolist()
+                
+                if not existing_cols:
+                    results["tables"][table] = {"exists": False, "missing_cols": required_cols}
+                    results["issues"].append(f"Table {table} does not exist")
+                    results["valid"] = False
+                else:
+                    missing = [c for c in required_cols if c not in existing_cols]
+                    results["tables"][table] = {
+                        "exists": True,
+                        "columns": len(existing_cols),
+                        "missing_cols": missing
+                    }
+                    if missing:
+                        results["issues"].append(f"Table {table} missing columns: {missing}")
+                        results["valid"] = False
+                        
+            except Exception as e:
+                results["tables"][table] = {"exists": False, "error": str(e)}
+                results["issues"].append(f"Error checking {table}: {e}")
+                results["valid"] = False
+        
+        con.close()
+        return results
+    
+    # =========================================================================
+    # SILVER: AGREGAR COLUMNAS NUEVAS SI NO EXISTEN
+    # =========================================================================
+    
+    def ensure_silver_columns(self):
+        """Asegura que silver_news_enriched tenga las columnas nuevas."""
+        con = self.get_connection()
+        
+        # Verificar y agregar columnas si no existen
+        columns_to_add = [
+            ("es_internacional", "BOOLEAN DEFAULT FALSE"),
+            ("es_resumen", "BOOLEAN DEFAULT FALSE"),
+            ("pais_evento", "VARCHAR DEFAULT 'Perú'"),
+        ]
+        
+        try:
+            existing = con.execute("""
+                SELECT column_name FROM information_schema.columns 
+                WHERE table_name = 'silver_news_enriched'
+            """).fetchdf()['column_name'].tolist()
+            
+            for col_name, col_def in columns_to_add:
+                if col_name not in existing:
+                    try:
+                        con.execute(f"ALTER TABLE silver_news_enriched ADD COLUMN {col_name} {col_def}")
+                        logger.info(f"Columna añadida: {col_name}")
+                    except Exception as e:
+                        logger.warning(f"No se pudo añadir {col_name}: {e}")
+        except Exception as e:
+            logger.error(f"Error verificando columnas silver: {e}")
+        
+        con.close()
+    
+    # =========================================================================
+    # BRONZE → SILVER
+    # =========================================================================
+    
+    def get_pending_articles(self, limit: int = 100) -> List[Dict]:
+        """Obtiene artículos de bronze que no están en silver."""
+        con = self.get_connection()
+        
+        df = con.execute(f"""
+            SELECT 
+                b.incident_id,
+                b.title,
+                b.body,
+                b.source_title,
+                b.url,
+                b.published_at
+            FROM bronze_news b
+            LEFT JOIN silver_news_enriched s ON b.incident_id = s.bronze_id
+            WHERE s.bronze_id IS NULL
+            LIMIT {limit}
+        """).fetchdf()
+        
+        con.close()
+        return df.to_dict('records')
+    
+    def process_to_silver(self, limit: int = 100, show_progress: bool = True):
+        """Procesa artículos de bronze a silver con enriquecimiento LLM."""
+        # Asegurar columnas nuevas existen
+        self.ensure_silver_columns()
+        
+        articles = self.get_pending_articles(limit)
+        
+        if not articles:
+            logger.info("No hay artículos pendientes de procesar")
+            return {"processed": 0, "relevantes": 0, "stats": self.llm.get_stats()}
+        
+        logger.info(f"Procesando {len(articles)} artículos...")
+        
+        con = self.get_connection()
+        processed = 0
+        relevantes = 0
+        errores = 0
+        
+        for i, article in enumerate(articles, 1):
+            # Enriquecer con LLM
+            enriched = self.llm.enrich_article(
+                title=article['title'],
+                body=article['body'],
+                source=article['source_title']
+            )
+            
+            if 'error' in enriched:
+                logger.warning(f"Error procesando {article['incident_id']}: {enriched['error']}")
+                errores += 1
+                continue
+            
+            # VALIDACIÓN ROBUSTA: normalizar respuesta LLM
+            enriched = QualityValidator.validar_respuesta_llm(enriched)
+            
+            # Validación adicional post-LLM con reglas
+            es_resumen_detectado = QualityValidator.es_probable_resumen(
+                article['title'],
+                article['body'],
+                enriched.get('muertos') or 0,
+                enriched.get('heridos') or 0
+            )
+            
+            es_internacional_detectado = QualityValidator.es_probable_internacional(
+                article['title'],
+                article['body'],
+                enriched.get('departamento')
+            )
+            
+            # Combinar detección LLM + reglas (cualquiera de los dos)
+            es_internacional = enriched.get('es_internacional', False) or es_internacional_detectado
+            es_resumen = enriched.get('es_resumen', False) or es_resumen_detectado
+            
+            # Si es resumen o internacional, marcar como no relevante
+            if es_resumen or es_internacional:
+                # Mantener tipo_evento para análisis, pero marcar es_relevante = False
+                if es_resumen:
+                    enriched['es_relevante'] = False
+                    logger.debug(f"Artículo marcado como resumen: {article['title'][:50]}")
+                if es_internacional:
+                    enriched['es_relevante'] = False
+                    logger.debug(f"Artículo marcado como internacional: {article['title'][:50]}")
+            
+            # Insertar en silver
+            total_tokens = (enriched.get('_tokens_in') or 0) + (enriched.get('_tokens_out') or 0)
+            
+            try:
+                con.execute("""
+                    INSERT INTO silver_news_enriched (
+                        incident_id, bronze_id, 
+                        es_relevante, es_internacional, es_resumen, 
+                        tipo_evento, subtipo, confianza,
+                        muertos, heridos, 
+                        departamento, provincia, distrito, ubicacion_especifica,
+                        lat, lon,
+                        actores_json, organizaciones_json,
+                        resumen_es, resumen_en, 
+                        sentiment, 
+                        modelo_llm, tokens_usados,
+                        title, published_at, source_name, url,
+                        pais_evento
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, [
+                    article['incident_id'],
+                    article['incident_id'],
+                    enriched.get('es_relevante', False),
+                    es_internacional,
+                    es_resumen,
+                    enriched.get('tipo_evento', 'no_relevante'),
+                    enriched.get('subtipo'),
+                    enriched.get('confianza'),
+                    enriched.get('muertos'),
+                    enriched.get('heridos'),
+                    enriched.get('departamento'),
+                    enriched.get('provincia'),
+                    enriched.get('distrito'),
+                    enriched.get('ubicacion_especifica'),
+                    None,  # lat (pendiente geocoding)
+                    None,  # lon
+                    json.dumps(enriched.get('actores', [])),
+                    json.dumps(enriched.get('organizaciones', [])),
+                    enriched.get('resumen_es'),
+                    enriched.get('resumen_en'),
+                    enriched.get('sentiment'),
+                    enriched.get('_model'),
+                    total_tokens,
+                    article['title'],
+                    article['published_at'],
+                    article['source_title'],
+                    article['url'],
+                    enriched.get('pais_evento', 'Perú'),
+                ])
+                
+                processed += 1
+                if enriched.get('es_relevante'):
+                    relevantes += 1
+                    
+            except Exception as e:
+                logger.error(f"Error INSERT silver para {article['incident_id']}: {e}")
+                errores += 1
+                continue
+            
+            # Mostrar progreso
+            if show_progress and i % BATCH_SIZE == 0:
+                logger.info(f"  Procesados: {i}/{len(articles)} ({relevantes} relevantes, {errores} errores)")
+        
+        con.close()
+        
+        logger.success(f"Procesados: {processed}, Relevantes: {relevantes}, Errores: {errores}")
+        return {
+            "processed": processed,
+            "relevantes": relevantes,
+            "errores": errores,
+            "stats": self.llm.get_stats()
+        }
+    
+    # =========================================================================
+    # SILVER → GOLD (CON FILTROS DE CALIDAD REFORZADOS)
+    # =========================================================================
+    
+    def build_gold_incidents(self):
+        """
+        Construye gold_incidents desde silver aplicando filtros de calidad:
+        - Solo es_relevante = TRUE
+        - Excluye es_internacional = TRUE
+        - Excluye es_resumen = TRUE
+        - Excluye tipo_evento = 'no_relevante'
+        - Excluye registros con es_relevante NULL (defensivo)
+        """
+        con = self.get_connection()
+        
+        # Verificar cuántos hay antes
+        before_gold = con.execute("SELECT COUNT(*) FROM gold_incidents").fetchone()[0]
+        
+        # Limpiar y reconstruir
+        con.execute("DELETE FROM gold_incidents")
+        
+        # INSERT con filtros ROBUSTOS (COALESCE para evitar NULL issues)
+        con.execute("""
+            INSERT INTO gold_incidents (
+                incident_id, tipo_evento, subtipo,
+                fecha_incidente, fecha_publicacion,
+                muertos, heridos,
+                departamento, provincia, distrito, ubicacion_display,
+                lat, lon, tiene_geo,
+                actores, organizaciones,
+                titulo, resumen, url, source_name,
+                sentiment, relevancia_score
+            )
+            SELECT 
+                s.incident_id,
+                s.tipo_evento,
+                s.subtipo,
+                CAST(s.published_at AS DATE) as fecha_incidente,
+                CAST(s.published_at AS TIMESTAMP) as fecha_publicacion,
+                COALESCE(s.muertos, 0),
+                COALESCE(s.heridos, 0),
+                s.departamento,
+                s.provincia,
+                s.distrito,
+                COALESCE(s.ubicacion_especifica, s.distrito, s.provincia, s.departamento, 'Perú'),
+                s.lat,
+                s.lon,
+                CASE WHEN s.lat IS NOT NULL THEN TRUE ELSE FALSE END,
+                REPLACE(REPLACE(REPLACE(COALESCE(s.actores_json, '[]'), '["', ''), '"]', ''), '","', '; '),
+                REPLACE(REPLACE(REPLACE(COALESCE(s.organizaciones_json, '[]'), '["', ''), '"]', ''), '","', '; '),
+                s.title,
+                s.resumen_es,
+                s.url,
+                s.source_name,
+                s.sentiment,
+                s.confianza
+            FROM silver_news_enriched s
+            WHERE COALESCE(s.es_relevante, FALSE) = TRUE
+              AND COALESCE(s.es_internacional, FALSE) = FALSE
+              AND COALESCE(s.es_resumen, FALSE) = FALSE
+              AND COALESCE(s.tipo_evento, 'no_relevante') != 'no_relevante'
+        """)
+        
+        count = con.execute("SELECT COUNT(*) FROM gold_incidents").fetchone()[0]
+        
+        # Log de lo que se filtró
+        stats = con.execute("""
+            SELECT 
+                COUNT(*) as total_silver,
+                SUM(CASE WHEN COALESCE(es_relevante, FALSE) = FALSE THEN 1 ELSE 0 END) as no_relevantes,
+                SUM(CASE WHEN COALESCE(es_internacional, FALSE) = TRUE THEN 1 ELSE 0 END) as internacionales,
+                SUM(CASE WHEN COALESCE(es_resumen, FALSE) = TRUE THEN 1 ELSE 0 END) as resumenes,
+                SUM(CASE WHEN COALESCE(tipo_evento, 'no_relevante') = 'no_relevante' THEN 1 ELSE 0 END) as tipo_no_relevante
+            FROM silver_news_enriched
+        """).fetchone()
+        
+        con.close()
+        
+        logger.success(f"gold_incidents construido: {count} incidentes (antes: {before_gold})")
+        logger.info(f"  Silver total: {stats[0]}")
+        logger.info(f"  Filtrados - No relevantes: {stats[1]}, Internacionales: {stats[2]}, "
+                    f"Resúmenes: {stats[3]}, Tipo no_relevante: {stats[4]}")
+        
+        return {"count": count, "before": before_gold, "filtered": {
+            "total_silver": stats[0],
+            "no_relevantes": stats[1],
+            "internacionales": stats[2],
+            "resumenes": stats[3],
+            "tipo_no_relevante": stats[4]
+        }}
+    
+    def build_gold_daily_stats(self):
+        """Construye estadísticas diarias agregadas."""
+        con = self.get_connection()
+        
+        # Limpiar y reconstruir
+        con.execute("DELETE FROM gold_daily_stats")
+        
+        # Obtener fechas únicas
+        fechas = con.execute("""
+            SELECT DISTINCT fecha_incidente 
+            FROM gold_incidents 
+            WHERE fecha_incidente IS NOT NULL
+            ORDER BY fecha_incidente
+        """).fetchall()
+        
+        for (fecha,) in fechas:
+            # Totales del día
+            totals = con.execute("""
+                SELECT 
+                    COUNT(*) as total,
+                    COALESCE(SUM(muertos), 0) as muertos,
+                    COALESCE(SUM(heridos), 0) as heridos,
+                    SUM(CASE WHEN tiene_geo THEN 1 ELSE 0 END) as con_geo,
+                    SUM(CASE WHEN relevancia_score > 0.7 THEN 1 ELSE 0 END) as alta_rel
+                FROM gold_incidents
+                WHERE fecha_incidente = ?
+            """, [fecha]).fetchone()
+            
+            # Por tipo
+            por_tipo = con.execute("""
+                SELECT tipo_evento, COUNT(*) as n
+                FROM gold_incidents
+                WHERE fecha_incidente = ?
+                GROUP BY tipo_evento
+            """, [fecha]).fetchdf()
+            por_tipo_json = json.dumps(dict(zip(por_tipo['tipo_evento'], por_tipo['n'])))
+            
+            # Por departamento
+            por_depto = con.execute("""
+                SELECT COALESCE(departamento, 'Sin ubicación') as depto, COUNT(*) as n
+                FROM gold_incidents
+                WHERE fecha_incidente = ?
+                GROUP BY departamento
+            """, [fecha]).fetchdf()
+            por_depto_json = json.dumps(dict(zip(por_depto['depto'], por_depto['n'])))
+            
+            # Insertar
+            con.execute("""
+                INSERT INTO gold_daily_stats (
+                    fecha, total_incidentes, total_muertos, total_heridos,
+                    por_tipo_json, por_departamento_json,
+                    incidentes_con_geo, incidentes_alta_relevancia
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, [
+                fecha, totals[0], totals[1], totals[2],
+                por_tipo_json, por_depto_json,
+                totals[3], totals[4]
+            ])
+        
+        count = con.execute("SELECT COUNT(*) FROM gold_daily_stats").fetchone()[0]
+        con.close()
+        
+        logger.success(f"gold_daily_stats construido: {count} días")
+        return {"days": count}
+    
+    # =========================================================================
+    # LIMPIEZA DE DATOS EXISTENTES
+    # =========================================================================
+    
+    def clean_existing_gold(self) -> Dict[str, Any]:
+        """
+        Limpia gold_incidents de registros problemáticos ya existentes.
+        Usa reglas heurísticas para detectar:
+        - tipo_evento = 'no_relevante'
+        - Artículos internacionales (sin geo + menciones de otros países)
+        - Artículos de resumen/conmemoración
+        - Artículos de opinión/análisis (sin incidente específico)
+        - Duplicados del mismo evento
+        """
+        con = self.get_connection()
+        
+        before_count = con.execute("SELECT COUNT(*) FROM gold_incidents").fetchone()[0]
+        
+        deleted = {
+            "no_relevante": 0,
+            "internacionales": 0,
+            "resumenes": 0,
+            "opinion": 0,
+            "duplicados": 0,
+        }
+        
+        # 1. Eliminar no_relevante
+        result = con.execute("""
+            DELETE FROM gold_incidents 
+            WHERE tipo_evento = 'no_relevante'
+            RETURNING incident_id
+        """).fetchall()
+        deleted["no_relevante"] = len(result)
+        if result:
+            logger.info(f"Eliminados {len(result)} registros no_relevante")
+        
+        # 2. Detectar y eliminar probables internacionales
+        sospechosos_intl = con.execute("""
+            SELECT incident_id, titulo, muertos
+            FROM gold_incidents
+            WHERE departamento IS NULL
+        """).fetchdf()
+        
+        ids_intl_eliminar = []
+        patrones_intl = [
+            'ee.uu.', 'eeuu', 'estados unidos', 'colombia', 'venezuela',
+            'ecuador', 'bolivia', 'chile', 'brasil', 'brazil', 'argentina',
+            'maduro', 'petro', 'lula', 'biden', 'trump', 'milei',
+            'south pacific', 'pacific ocean', 'in brazil', 'in colombia'
+        ]
+        for _, row in sospechosos_intl.iterrows():
+            titulo_lower = row['titulo'].lower()
+            if any(p in titulo_lower for p in patrones_intl):
+                ids_intl_eliminar.append(row['incident_id'])
+        
+        if ids_intl_eliminar:
+            placeholders = ','.join(['?' for _ in ids_intl_eliminar])
+            con.execute(f"DELETE FROM gold_incidents WHERE incident_id IN ({placeholders})", 
+                       ids_intl_eliminar)
+            deleted["internacionales"] = len(ids_intl_eliminar)
+            logger.info(f"Eliminados {len(ids_intl_eliminar)} registros internacionales")
+        
+        # 3. Detectar y eliminar artículos de opinión/análisis sin incidente
+        sospechosos_opinion = con.execute("""
+            SELECT incident_id, titulo
+            FROM gold_incidents
+            WHERE departamento IS NULL
+              AND (LENGTH(titulo) < 20 
+                   OR titulo LIKE '%El costo%'
+                   OR titulo LIKE '%no es el único%'
+                   OR titulo LIKE '%A ciegas%'
+                   OR titulo LIKE '%análisis%'
+                   OR titulo LIKE '%reflexión%')
+        """).fetchdf()
+        
+        ids_opinion = sospechosos_opinion['incident_id'].tolist()
+        if ids_opinion:
+            placeholders = ','.join(['?' for _ in ids_opinion])
+            con.execute(f"DELETE FROM gold_incidents WHERE incident_id IN ({placeholders})", 
+                       ids_opinion)
+            deleted["opinion"] = len(ids_opinion)
+            logger.info(f"Eliminados {len(ids_opinion)} artículos de opinión/análisis")
+        
+        # 4. Detectar y eliminar resúmenes y conmemoraciones
+        patrones_resumen_conmem = [
+            'recordará', 'recordarán', 'conmemoración', 'aniversario',
+            'en 2025', 'en 2024', 'en el 2025', 'en el 2024',
+            'asesinados en 2025', 'asesinados en 2024',
+            'piden al presidente', 'luchar contra', 'los 10 casos'
+        ]
+        
+        sospechosos_resumen = con.execute("""
+            SELECT incident_id, titulo, muertos, heridos
+            FROM gold_incidents
+            WHERE muertos >= ? OR heridos >= ?
+        """, [UMBRAL_MUERTOS_SOSPECHOSO, UMBRAL_HERIDOS_SOSPECHOSO]).fetchdf()
+        
+        ids_resumen_eliminar = []
+        for _, row in sospechosos_resumen.iterrows():
+            titulo_lower = row['titulo'].lower()
+            # Verificar patrones de resumen/conmemoración
+            if any(p in titulo_lower for p in patrones_resumen_conmem):
+                ids_resumen_eliminar.append(row['incident_id'])
+            # También verificar con QualityValidator
+            elif QualityValidator.es_probable_resumen(
+                row['titulo'], '', row['muertos'] or 0, row['heridos'] or 0
+            ):
+                ids_resumen_eliminar.append(row['incident_id'])
+        
+        # Añadir también los que tienen patrones sin importar víctimas
+        adicionales = con.execute("""
+            SELECT incident_id, titulo
+            FROM gold_incidents
+            WHERE LOWER(titulo) LIKE '%recordará%'
+               OR LOWER(titulo) LIKE '%conmemoración%'
+               OR LOWER(titulo) LIKE '%los _0 %'
+               OR (LOWER(titulo) LIKE '%asesinados en 202%' AND departamento IS NULL)
+        """).fetchdf()
+        
+        for _, row in adicionales.iterrows():
+            if row['incident_id'] not in ids_resumen_eliminar:
+                ids_resumen_eliminar.append(row['incident_id'])
+        
+        if ids_resumen_eliminar:
+            placeholders = ','.join(['?' for _ in ids_resumen_eliminar])
+            con.execute(f"DELETE FROM gold_incidents WHERE incident_id IN ({placeholders})", 
+                       ids_resumen_eliminar)
+            deleted["resumenes"] = len(ids_resumen_eliminar)
+            logger.info(f"Eliminados {len(ids_resumen_eliminar)} resúmenes/conmemoraciones")
+        
+        # 5. Deduplicar eventos (mantener el de mayor heridos/muertos)
+        deleted["duplicados"] = self._dedupe_eventos(con)
+        
+        after_count = con.execute("SELECT COUNT(*) FROM gold_incidents").fetchone()[0]
+        con.close()
+        
+        total_deleted = sum(deleted.values())
+        logger.success(f"Limpieza completada: {before_count} → {after_count} ({total_deleted} eliminados)")
+        
+        return {
+            "before": before_count,
+            "after": after_count,
+            "deleted": deleted
+        }
+    
+    def _dedupe_eventos(self, con) -> int:
+        """
+        Detecta y elimina artículos duplicados sobre el mismo evento.
+        Mantiene el artículo con más información (mayor heridos+muertos).
+        """
+        # Buscar eventos con múltiples artículos similares
+        # Estrategia: agrupar por (departamento, fecha, palabras clave en título)
+        
+        todos = con.execute("""
+            SELECT incident_id, departamento, fecha_incidente, titulo, muertos, heridos
+            FROM gold_incidents
+            ORDER BY departamento, fecha_incidente
+        """).fetchdf()
+        
+        if len(todos) == 0:
+            return 0
+        
+        # Detectar clusters de eventos similares
+        eventos_por_clave = {}
+        
+        for _, row in todos.iterrows():
+            # Crear clave de agrupación
+            palabras_clave = self._extraer_palabras_clave(row['titulo'])
+            depto = row['departamento'] or 'SIN_GEO'
+            fecha = str(row['fecha_incidente'])
+            
+            # Buscar match con eventos existentes
+            matched = False
+            for clave in list(eventos_por_clave.keys()):
+                clave_depto, clave_fecha, clave_palabras = clave
+                if (depto == clave_depto and 
+                    fecha == clave_fecha and 
+                    len(palabras_clave & clave_palabras) >= 2):  # Al menos 2 palabras en común
+                    eventos_por_clave[clave].append(row)
+                    matched = True
+                    break
+            
+            if not matched:
+                nueva_clave = (depto, fecha, frozenset(palabras_clave))
+                eventos_por_clave[nueva_clave] = [row]
+        
+        # Identificar duplicados y mantener el mejor
+        ids_a_eliminar = []
+        
+        for clave, articulos in eventos_por_clave.items():
+            if len(articulos) > 1:
+                # Ordenar por (muertos + heridos) descendente
+                articulos_sorted = sorted(
+                    articulos, 
+                    key=lambda x: (x['muertos'] or 0) + (x['heridos'] or 0),
+                    reverse=True
+                )
+                # Mantener el primero, eliminar el resto
+                for art in articulos_sorted[1:]:
+                    ids_a_eliminar.append(art['incident_id'])
+                    
+                logger.debug(f"Duplicados detectados: {[a['titulo'][:40] for a in articulos]}")
+        
+        if ids_a_eliminar:
+            placeholders = ','.join(['?' for _ in ids_a_eliminar])
+            con.execute(f"DELETE FROM gold_incidents WHERE incident_id IN ({placeholders})", 
+                       ids_a_eliminar)
+            logger.info(f"Eliminados {len(ids_a_eliminar)} artículos duplicados")
+        
+        return len(ids_a_eliminar)
+    
+    def _extraer_palabras_clave(self, titulo: str) -> set:
+        """Extrae palabras clave de un título para comparación."""
+        stopwords = {
+            'el', 'la', 'los', 'las', 'de', 'del', 'en', 'a', 'por', 'para',
+            'con', 'sin', 'que', 'y', 'o', 'un', 'una', 'tras', 'ante', 'al',
+            'se', 'su', 'sus', 'es', 'son', 'fue', 'han', 'hay', 'más', 'menos'
+        }
+        palabras = re.findall(r'\w+', titulo.lower())
+        return {p for p in palabras if p not in stopwords and len(p) > 3}
+    
+    def update_silver_flags(self) -> Dict[str, Any]:
+        """
+        Actualiza flags es_internacional y es_resumen en silver 
+        para registros existentes que no los tienen.
+        """
+        con = self.get_connection()
+        
+        # Asegurar columnas existen
+        self.ensure_silver_columns()
+        
+        # Obtener registros a revisar
+        pendientes = con.execute("""
+            SELECT bronze_id, title, body, departamento, muertos, heridos
+            FROM silver_news_enriched
+            WHERE es_internacional IS NULL OR es_resumen IS NULL
+        """).fetchdf()
+        
+        updated = {"internacional": 0, "resumen": 0}
+        
+        for _, row in pendientes.iterrows():
+            es_intl = QualityValidator.es_probable_internacional(
+                row['title'], row['body'], row['departamento']
+            )
+            es_res = QualityValidator.es_probable_resumen(
+                row['title'], row['body'], row['muertos'] or 0, row['heridos'] or 0
+            )
+            
+            if es_intl or es_res:
+                con.execute("""
+                    UPDATE silver_news_enriched 
+                    SET es_internacional = ?, es_resumen = ?
+                    WHERE bronze_id = ?
+                """, [es_intl, es_res, row['bronze_id']])
+                
+                if es_intl:
+                    updated["internacional"] += 1
+                if es_res:
+                    updated["resumen"] += 1
+        
+        con.close()
+        logger.info(f"Silver actualizado: {updated['internacional']} internacionales, "
+                   f"{updated['resumen']} resúmenes marcados")
+        
+        return updated
+    
+    # =========================================================================
+    # DIAGNÓSTICO
+    # =========================================================================
+    
+    def diagnose_gold_quality(self) -> Dict[str, Any]:
+        """Genera diagnóstico de calidad de gold_incidents."""
+        con = self.get_connection()
+        
+        result = {
+            "total": con.execute("SELECT COUNT(*) FROM gold_incidents").fetchone()[0],
+            "sin_geo": 0,
+            "victimas_altas": [],
+            "tipos": {},
+            "departamentos": {},
+        }
+        
+        # Sin geolocalización
+        sin_geo = con.execute("""
+            SELECT incident_id, tipo_evento, titulo, muertos, heridos
+            FROM gold_incidents 
+            WHERE departamento IS NULL
+            ORDER BY muertos DESC
+        """).fetchdf()
+        result["sin_geo"] = len(sin_geo)
+        result["sin_geo_detalle"] = sin_geo.to_dict('records')
+        
+        # Víctimas sospechosamente altas
+        altas = con.execute(f"""
+            SELECT incident_id, tipo_evento, departamento, muertos, heridos, titulo
+            FROM gold_incidents 
+            WHERE muertos >= {UMBRAL_MUERTOS_SOSPECHOSO} 
+               OR heridos >= {UMBRAL_HERIDOS_SOSPECHOSO}
+            ORDER BY muertos + heridos DESC
+        """).fetchdf()
+        result["victimas_altas"] = altas.to_dict('records')
+        
+        # Distribución por tipo
+        tipos = con.execute("""
+            SELECT tipo_evento, COUNT(*) as n, SUM(muertos) as muertos
+            FROM gold_incidents GROUP BY tipo_evento ORDER BY n DESC
+        """).fetchdf()
+        result["tipos"] = dict(zip(tipos['tipo_evento'], tipos['n']))
+        
+        # Distribución por departamento
+        deptos = con.execute("""
+            SELECT COALESCE(departamento, 'Sin ubicación') as depto, COUNT(*) as n
+            FROM gold_incidents GROUP BY departamento ORDER BY n DESC
+        """).fetchdf()
+        result["departamentos"] = dict(zip(deptos['depto'], deptos['n']))
+        
+        con.close()
+        return result
+    
+    # =========================================================================
+    # PIPELINE COMPLETO
+    # =========================================================================
+    
+    def run_full_pipeline(self, limit: int = 100):
+        """Ejecuta pipeline completo: Bronze → Silver → Gold."""
+        logger.info("=" * 60)
+        logger.info("PIPELINE DE ENRIQUECIMIENTO LLM")
+        logger.info("=" * 60)
+        
+        # 0. Validar schema
+        logger.info("\n[0/3] Validando schema...")
+        schema_check = self.validate_schema()
+        if not schema_check['valid']:
+            logger.warning(f"Schema issues: {schema_check['issues']}")
+        
+        # 1. Bronze → Silver
+        logger.info("\n[1/3] Procesando Bronze → Silver...")
+        silver_result = self.process_to_silver(limit=limit)
+        
+        # 2. Silver → Gold Incidents
+        logger.info("\n[2/3] Construyendo Gold Incidents...")
+        gold_result = self.build_gold_incidents()
+        
+        # 3. Gold Daily Stats
+        logger.info("\n[3/3] Construyendo Gold Daily Stats...")
+        stats_result = self.build_gold_daily_stats()
+        
+        # Resumen
+        logger.info("\n" + "=" * 60)
+        logger.success("PIPELINE COMPLETADO")
+        logger.info(f"  Artículos procesados: {silver_result['processed']}")
+        logger.info(f"  Artículos relevantes: {silver_result['relevantes']}")
+        logger.info(f"  Errores: {silver_result.get('errores', 0)}")
+        logger.info(f"  Incidentes en gold: {gold_result['count']}")
+        logger.info(f"  Días con stats: {stats_result['days']}")
+        logger.info(f"  Costo API: ${silver_result['stats']['cost_usd']}")
+        logger.info("=" * 60)
+        
+        return {
+            "silver": silver_result,
+            "gold": gold_result,
+            "stats": stats_result
+        }
+
+
+# =============================================================================
+# CLI
+# =============================================================================
+
+if __name__ == "__main__":
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Pipeline de Enriquecimiento LLM")
+    parser.add_argument("--process-new", type=int, metavar="N",
+                        help="Procesar N artículos nuevos de bronze a silver")
+    parser.add_argument("--build-gold", action="store_true",
+                        help="Reconstruir tablas gold desde silver")
+    parser.add_argument("--full", type=int, metavar="N",
+                        help="Pipeline completo con N artículos")
+    parser.add_argument("--clean-gold", action="store_true",
+                        help="Limpiar gold_incidents de registros problemáticos")
+    parser.add_argument("--diagnose", action="store_true",
+                        help="Diagnosticar calidad de gold_incidents")
+    parser.add_argument("--status", action="store_true",
+                        help="Mostrar estado actual de las tablas")
+    parser.add_argument("--validate-schema", action="store_true",
+                        help="Validar que el schema Medallion esté correcto")
+    
+    args = parser.parse_args()
+    
+    pipeline = EnrichmentPipeline()
+    
+    if args.validate_schema:
+        print("\n=== VALIDACIÓN DE SCHEMA ===")
+        result = pipeline.validate_schema()
+        print(f"Valid: {result['valid']}")
+        for table, info in result['tables'].items():
+            status = "✅" if info.get('exists') and not info.get('missing_cols') else "❌"
+            print(f"  {status} {table}: {info}")
+        if result['issues']:
+            print("\nIssues:")
+            for issue in result['issues']:
+                print(f"  - {issue}")
+    
+    elif args.status:
+        con = pipeline.get_connection()
+        print("\n=== ESTADO DE TABLAS ===")
+        for table in ['bronze_news', 'silver_news_enriched', 'gold_incidents', 'gold_daily_stats']:
+            try:
+                count = con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                print(f"  {table:25} {count:>6} rows")
+            except Exception as e:
+                print(f"  {table:25} ERROR: {e}")
+        
+        # Pendientes
+        try:
+            pending = con.execute("""
+                SELECT COUNT(*) FROM bronze_news b
+                LEFT JOIN silver_news_enriched s ON b.incident_id = s.bronze_id
+                WHERE s.bronze_id IS NULL
+            """).fetchone()[0]
+            print(f"\n  Pendientes de procesar: {pending}")
+        except:
+            pass
+        con.close()
+    
+    elif args.process_new:
+        pipeline.process_to_silver(limit=args.process_new)
+    
+    elif args.build_gold:
+        pipeline.build_gold_incidents()
+        pipeline.build_gold_daily_stats()
+    
+    elif args.full:
+        pipeline.run_full_pipeline(limit=args.full)
+    
+    elif args.clean_gold:
+        print("\n=== LIMPIEZA DE GOLD_INCIDENTS ===")
+        result = pipeline.clean_existing_gold()
+        print(f"\nResultado:")
+        print(f"  Antes: {result['before']}")
+        print(f"  Después: {result['after']}")
+        print(f"  Eliminados:")
+        for k, v in result['deleted'].items():
+            print(f"    - {k}: {v}")
+        
+        # Reconstruir stats
+        print("\nReconstruyendo gold_daily_stats...")
+        pipeline.build_gold_daily_stats()
+    
+    elif args.diagnose:
+        print("\n=== DIAGNÓSTICO DE CALIDAD ===")
+        diag = pipeline.diagnose_gold_quality()
+        print(f"\nTotal incidentes: {diag['total']}")
+        print(f"Sin geolocalización: {diag['sin_geo']}")
+        
+        if diag['sin_geo_detalle']:
+            print("\nDetalle sin geo:")
+            for item in diag['sin_geo_detalle'][:10]:
+                print(f"  [{item['incident_id'][:20]}] {item['tipo_evento']:20} "
+                      f"M:{item['muertos']} - {item['titulo'][:50]}")
+        
+        if diag['victimas_altas']:
+            print(f"\nVíctimas altas (>{UMBRAL_MUERTOS_SOSPECHOSO}M o >{UMBRAL_HERIDOS_SOSPECHOSO}H):")
+            for item in diag['victimas_altas']:
+                print(f"  [{item['departamento'] or 'Sin geo':12}] M:{item['muertos']:3} H:{item['heridos']:3} "
+                      f"- {item['titulo'][:50]}")
+    
+    else:
+        parser.print_help()

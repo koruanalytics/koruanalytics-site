@@ -1,0 +1,180 @@
+# =============================================================================
+# NewsAPI.ai Scope Configuration - Peru Elections 2026 v5.0
+# =============================================================================
+# CAMBIOS v5:
+# - Estrategia híbrida: sourceUri + keywords
+# - Filtra en la ingesta para reducir volumen y tokens LLM
+# - 7 fuentes peruanas + keywords de seguridad/elecciones
+# - Estimado: ~50-150 artículos relevantes/día
+# =============================================================================
+
+generated_at_utc: '2026-01-05T00:00:00Z'
+provider: newsapi.ai (EventRegistry)
+version: '5.0'
+strategy: source_keywords  # Nueva estrategia híbrida
+
+# =============================================================================
+# FUENTES PERUANAS
+# =============================================================================
+source_uris:
+  - elcomercio.pe
+  - larepublica.pe
+  - diariocorreo.pe
+  - andina.pe
+  - gestion.pe
+  - rpp.pe
+  - ojo.pe
+
+# =============================================================================
+# KEYWORDS PARA FILTRAR (OR logic)
+# =============================================================================
+# Estos keywords filtran artículos en la query de ingesta
+# Solo se traen artículos que contengan AL MENOS UNO de estos términos
+
+keywords:
+  # Seguridad y violencia
+  seguridad:
+    - asesinato
+    - homicidio
+    - sicariato
+    - crimen
+    - criminal
+    - delincuencia
+    - robo
+    - asalto
+    - secuestro
+    - extorsión
+    - feminicidio
+    - violación
+    - violencia
+    - balacera
+    - tiroteo
+    - arma
+    - disparos
+    - herido
+    - muerto
+    - víctima
+    - fallecido
+    
+  # Narcotráfico y crimen organizado  
+  narcotrafico:
+    - narcotráfico
+    - droga
+    - cocaína
+    - narco
+    - cártel
+    - banda criminal
+    - organización criminal
+    - lavado de dinero
+    - trata de personas
+    
+  # Terrorismo y conflicto
+  terrorismo:
+    - terrorismo
+    - terrorista
+    - Sendero Luminoso
+    - VRAEM
+    - subversivo
+    - atentado
+    - explosivo
+    - bomba
+    
+  # Desastres y accidentes
+  desastres:
+    - accidente
+    - choque
+    - volcadura
+    - atropello
+    - incendio
+    - sismo
+    - terremoto
+    - huayco
+    - inundación
+    - derrumbe
+    - deslizamiento
+    - emergencia
+    
+  # Protestas y conflictos sociales
+  protestas:
+    - protesta
+    - manifestación
+    - paro
+    - huelga
+    - bloqueo
+    - disturbio
+    - enfrentamiento
+    - conflicto social
+    
+  # Electoral y político
+  electoral:
+    - elecciones
+    - electoral
+    - candidato
+    - candidata
+    - campaña electoral
+    - fraude electoral
+    - JNE
+    - ONPE
+    - voto
+    - comicios
+    - primarias
+
+# Lista plana de todos los keywords para uso en query
+all_keywords:
+  - asesinato
+  - homicidio
+  - sicariato
+  - crimen
+  - delincuencia
+  - robo
+  - asalto
+  - secuestro
+  - extorsión
+  - feminicidio
+  - violación
+  - violencia
+  - balacera
+  - tiroteo
+  - herido
+  - muerto
+  - víctima
+  - narcotráfico
+  - droga
+  - terrorismo
+  - Sendero Luminoso
+  - VRAEM
+  - atentado
+  - accidente
+  - choque
+  - incendio
+  - sismo
+  - terremoto
+  - huayco
+  - emergencia
+  - protesta
+  - manifestación
+  - paro
+  - huelga
+  - bloqueo
+  - elecciones
+  - candidato
+  - fraude
+
+# =============================================================================
+# CONFIGURACIÓN DE QUERY
+# =============================================================================
+query_config:
+  langs:
+    - spa
+    - eng
+  max_articles_per_run: 500
+  max_per_source: 100
+  sort_by: date
+
+# =============================================================================
+# SCOPE GEOGRÁFICO
+# =============================================================================
+scope:
+  location_uri: http://en.wikipedia.org/wiki/Peru
+  country: Peru
+  country_code: PE

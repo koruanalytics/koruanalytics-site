@@ -1,0 +1,117 @@
+# =============================================================================
+# NewsAPI.ai Scope Configuration - Peru Elections 2026 v4.0
+# =============================================================================
+# CAMBIOS v4:
+# - Nueva estrategia: sourceUri en vez de locationUri
+# - 7 fuentes peruanas principales (~19K artículos/mes)
+# - Sin filtro por conceptUri (traer todo, clasificar después con ACLED)
+# - Máximo volumen de cobertura de medios peruanos
+# =============================================================================
+
+generated_at_utc: '2026-01-03T14:00:00Z'
+provider: newsapi.ai (EventRegistry)
+version: '4.0'
+strategy: source_based  # Nueva estrategia
+
+# =============================================================================
+# FUENTES PERUANAS
+# =============================================================================
+# Volumen estimado por fuente (artículos/mes, dic 2025):
+#   elcomercio.pe:    6,237
+#   larepublica.pe:   4,229
+#   diariocorreo.pe:  3,589
+#   andina.pe:        2,844  (Agencia Andina - estatal)
+#   gestion.pe:       1,961  (Economía/negocios)
+#   rpp.pe:             412  (Radio)
+#   ojo.pe:             246  (Tabloide)
+#   --------------------------
+#   TOTAL:           19,518
+# =============================================================================
+
+sources:
+  peru_main:
+    - uri: elcomercio.pe
+      name: El Comercio
+      type: newspaper
+      priority: 1
+    - uri: larepublica.pe
+      name: La República
+      type: newspaper
+      priority: 1
+    - uri: diariocorreo.pe
+      name: Correo
+      type: newspaper
+      priority: 1
+    - uri: andina.pe
+      name: Agencia Andina
+      type: news_agency
+      priority: 1
+    - uri: gestion.pe
+      name: Gestión
+      type: newspaper
+      priority: 2
+    - uri: rpp.pe
+      name: RPP Noticias
+      type: radio
+      priority: 1
+    - uri: ojo.pe
+      name: Ojo
+      type: tabloid
+      priority: 2
+
+# Lista plana para uso directo en queries
+source_uris:
+  - elcomercio.pe
+  - larepublica.pe
+  - diariocorreo.pe
+  - andina.pe
+  - gestion.pe
+  - rpp.pe
+  - ojo.pe
+
+# =============================================================================
+# CONFIGURACIÓN DE QUERY
+# =============================================================================
+query_config:
+  # Estrategia: traer TODO de las fuentes, sin filtro por concepto
+  mode: all_from_sources
+  
+  # Idiomas (para metadata, no filtra)
+  langs:
+    - spa
+    - eng
+  
+  # Límites por ejecución
+  max_articles_per_run: 500
+  
+  # Ordenar por fecha (más recientes primero)
+  sort_by: date
+
+# =============================================================================
+# CLASIFICACIÓN POST-INGESTA (referencia para pipeline)
+# =============================================================================
+# Los artículos se clasifican DESPUÉS de ingestar usando:
+# - ACLED event_type classification
+# - Keyword matching para sub-categorías
+# - Extracción de casualties
+# - Análisis de sentimiento
+
+classification_reference:
+  # Estos conceptos se usan como REFERENCIA para clasificación,
+  # NO para filtrar en la query de ingesta
+  security_concepts:
+    - Election
+    - Political_violence
+    - Murder
+    - Protest
+    - Terrorism
+    - Natural_disaster
+    - Traffic_collision
+  
+  acled_event_types:
+    - battles
+    - violence_against_civilians
+    - explosions_remote_violence
+    - riots
+    - protests
+    - strategic_developments

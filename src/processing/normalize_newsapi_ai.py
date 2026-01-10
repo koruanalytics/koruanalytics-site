@@ -1,3 +1,8 @@
+"""
+src/processing/normalize_newsapi_ai.py
+
+Normaliza artículos raw de NewsAPI.ai a formato parquet para bronze_news.
+"""
 from __future__ import annotations
 
 import json
@@ -23,7 +28,8 @@ def safe_get(d: Dict[str, Any], path: List[str], default=None):
     return cur
 
 
-def normalize_one_article(a: Dict[str, Any], meta: Dict[str, Any]) -> Dict[str, Any]:
+def normalize_one_article(a: Dict[str, Any], meta: Dict[str, Any], run_id: str, file_name: str) -> Dict[str, Any]:
+    """Normaliza un artículo individual al esquema de bronze_news."""
     uri = a.get("uri")
     url = a.get("url")
     title = a.get("title")
@@ -82,7 +88,7 @@ def normalize_one_article(a: Dict[str, Any], meta: Dict[str, Any]) -> Dict[str, 
     lon = location.get("lon") or location.get("longitude")
 
     record = {
-        "incident_id": uri,  # provisional (luego puedes generar id propio)
+        "incident_id": uri,
         "source": "newsapi_ai",
         "source_article_id": uri,
         "original_uri": original_uri,
@@ -102,12 +108,15 @@ def normalize_one_article(a: Dict[str, Any], meta: Dict[str, Any]) -> Dict[str, 
         "category_labels": category_labels,
         "location_uri": location_uri,
         "location_label": location_label,
-        "location_text": None,  # futuro: geoparsing desde title/body
+        "location_text": None,
         "lat": lat,
         "lon": lon,
         "adm1": None,
         "adm2": None,
         "adm3": None,
+        # Columnas de tracking de ingesta
+        "ingest_run_id": run_id,
+        "ingest_file": file_name,
     }
     return record
 
@@ -119,11 +128,24 @@ class NormalizeParams:
 
 
 def run_newsapi_ai_normalization(params: NormalizeParams) -> Path:
+    """
+    Normaliza un archivo JSON raw de NewsAPI.ai a parquet.
+    
+    Args:
+        params: NormalizeParams con raw_path y out_dir
+        
+    Returns:
+        Path al archivo parquet generado
+    """
     payload = json.loads(params.raw_path.read_text(encoding="utf-8"))
     meta = payload.get("meta", {})
     articles = payload.get("articles", [])
+    
+    # Extraer run_id y file_name del path
+    run_id = params.raw_path.stem  # e.g., "20260105010617"
+    file_name = params.raw_path.name  # e.g., "20260105010617.json"
 
-    rows = [normalize_one_article(a, meta) for a in articles]
+    rows = [normalize_one_article(a, meta, run_id, file_name) for a in articles]
     df = pd.DataFrame(rows)
 
     params.out_dir.mkdir(parents=True, exist_ok=True)
