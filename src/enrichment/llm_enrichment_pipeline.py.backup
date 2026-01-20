@@ -53,13 +53,7 @@ from loguru import logger
 # ============================================================================
 # Usa el nuevo módulo de abstracción que permite cambiar entre
 # Anthropic (local) y Azure OpenAI (producción) via LLM_PROVIDER env var
-from src.llm_providers import (
-    get_llm_client, 
-    TIPOS_EVENTO_VALIDOS, 
-    VICTIMA_PERFIL_VALIDOS, 
-    ARMA_USADA_VALIDOS,
-    ACLED_TO_TIPOS  # M10: ACLED English → Spanish mapping
-)
+from src.llm_providers import get_llm_client, TIPOS_EVENTO_VALIDOS, VICTIMA_PERFIL_VALIDOS, ARMA_USADA_VALIDOS
 
 # ============================================================================
 # GEOCODING SERVICE
@@ -400,28 +394,10 @@ class QualityValidator:
             tipo_evento = 'no_relevante'
         tipo_evento = tipo_evento.lower().strip()
         
-        # =====================================================================
-        # M10: MAPEO ACLED INGLÉS → TIPOS VÁLIDOS
-        # =====================================================================
-        # El LLM a veces devuelve taxonomía ACLED en inglés en lugar de
-        # nuestros tipos válidos en español. Intentamos mapear antes de
-        # marcar como no_relevante.
-        # =====================================================================
+        # Validar tipo_evento contra lista permitida
         if tipo_evento not in TIPOS_EVENTO_VALIDOS:
-            # Intentar mapear desde taxonomía ACLED en inglés
-            if tipo_evento in ACLED_TO_TIPOS:
-                tipo_mapeado = ACLED_TO_TIPOS[tipo_evento]
-                logger.info(
-                    f"[M10] Mapeando tipo_evento ACLED '{tipo_evento}' → '{tipo_mapeado}'"
-                )
-                tipo_evento = tipo_mapeado
-            else:
-                # No se encontró mapeo, marcar como no_relevante
-                logger.warning(
-                    f"tipo_evento inválido '{tipo_evento}' (no hay mapeo ACLED), "
-                    f"usando 'no_relevante'"
-                )
-                tipo_evento = 'no_relevante'
+            logger.warning(f"tipo_evento inválido '{tipo_evento}', usando 'no_relevante'")
+            tipo_evento = 'no_relevante'
         
         # REGLA CRÍTICA: si tipo_evento es no_relevante, es_relevante debe ser False
         if tipo_evento == 'no_relevante':

@@ -1,0 +1,411 @@
+"""
+src/llm_providers/prompts.py
+
+Shared prompts for LLM enrichment.
+Single source of truth for prompts used by all providers.
+
+This ensures consistent behavior across Anthropic and Azure OpenAI.
+
+Version: 2.2 - ACLED taxonomy aligned + M5 victima_perfil + M6 arma_usada
+Last updated: 2026-01-18
+"""
+
+# =============================================================================
+# ENRICHMENT PROMPT - Main classification prompt (ACLED-aligned v2.2)
+# =============================================================================
+
+ENRICHMENT_PROMPT = """Eres un analista de seguridad especializado en Perú. Analiza esta noticia y extrae información estructurada usando taxonomía ACLED (Armed Conflict Location & Event Data Project).
+
+CATEGORÍAS DE EVENTOS (usa exactamente estos valores):
+
+ACLED: BATTLES (Enfrentamientos armados)
+- violencia_armada: Enfrentamientos armados, tiroteos, balaceras, fuego cruzado, emboscadas con intercambio de disparos
+
+ACLED: VIOLENCE AGAINST CIVILIANS
+- crimen_violento: Asesinatos, homicidios, sicariato, ejecuciones, masacres, agresiones letales
+- secuestro: Secuestros, desapariciones forzadas, raptos, plagios
+- feminicidio: Asesinato de mujeres por razón de género
+- extorsion: Extorsión, cobro de cupos, amenazas por dinero, chantaje violento
+- violencia_politica: Ataques/amenazas a candidatos, alcaldes, regidores, funcionarios electos
+
+ACLED: SEXUAL VIOLENCE
+- violencia_sexual: Violaciones, abuso sexual, acoso sexual grave, trata de personas, prostitución forzada
+
+ACLED: PROTESTS
+- protesta: Marchas pacíficas, manifestaciones sin violencia, paros, huelgas, bloqueos pacíficos
+
+ACLED: RIOTS
+- disturbio: Disturbios violentos, vandalismo, saqueos, enfrentamientos violentos en protestas, barricadas
+
+ACLED: STRATEGIC DEVELOPMENTS
+- operativo_seguridad: Detenciones, capturas, allanamientos, incautaciones, intervenciones policiales
+- terrorismo: Ataques terroristas, Sendero Luminoso, VRAEM, narcoterrorismo, atentados
+- corrupcion: Investigaciones de corrupción, detenciones por corrupción, casos fiscales
+
+NOT ACLED (Peru-specific):
+- crimen_organizado: Narcotráfico, bandas criminales organizadas, mafias, redes delictivas
+- accidente_grave: Accidentes de tránsito/laborales/aéreos con víctimas múltiples
+- desastre_natural: Sismos, inundaciones, huaycos, deslizamientos, emergencias naturales
+
+OTHER:
+- no_relevante: Deportes, farándula, economía, política sin violencia, tecnología
+
+PERFILES DE VÍCTIMA (usa exactamente estos valores para victima_perfil):
+- comerciante: Dueños de negocios, vendedores, empresarios pequeños (bodegas, tiendas, mercados)
+- transportista: Choferes de taxi, mototaxi, buses, camiones, conductores de apps
+- autoridad: Policías, militares, fiscales, jueces, serenazgos, funcionarios públicos
+- candidato: Candidatos políticos, aspirantes a cargos de elección, precandidatos
+- periodista: Reporteros, comunicadores, camarógrafos, directores de medios
+- abogado: Abogados, notarios, asesores legales
+- empresario: Gerentes, ejecutivos, dueños de empresas medianas/grandes, industriales
+- estudiante: Alumnos de cualquier nivel educativo, universitarios
+- mujer: Víctima femenina no categorizada en otros perfiles (especialmente en feminicidio/violencia de género)
+- menor: Menores de edad (niños, adolescentes menores de 18 años)
+- civil: Ciudadanos comunes sin perfil específico identificable
+- desconocido: No se puede determinar el perfil de la víctima con la información disponible
+- no_aplica: No hay víctimas directas (ej: operativos, protestas pacíficas, desastres sin fatalidades)
+
+ARMA USADA (usa exactamente estos valores para arma_usada):
+- arma_fuego: Pistolas, revólveres, rifles, escopetas, armas automáticas, balacera, disparos
+- arma_blanca: Cuchillos, machetes, navajas, tijeras, objetos cortopunzantes
+- objeto_contundente: Palos, piedras, bates, martillos, golpes con objetos
+- explosivo: Bombas, granadas, dinamita, artefactos explosivos, detonaciones
+- vehiculo: Atropello intencional, embestida con vehículo como arma
+- fuego: Incendio intencional, quemaduras provocadas, uso de fuego como arma
+- veneno: Envenenamiento, sustancias tóxicas, drogas administradas sin consentimiento
+- ninguna: Violencia sin armas (golpes, estrangulamientos, asfixia manual)
+- desconocida: No se menciona o no se puede determinar el tipo de arma
+- no_aplica: No hay violencia física directa (protestas, desastres naturales, corrupción)
+
+CRITERIOS NO RELEVANTE:
+- Noticias de entretenimiento, farándula, celebridades
+- Deportes (excepto violencia en estadios)
+- Economía/negocios general (sin crimen)
+- Política internacional sin impacto directo en Perú
+- Horóscopo, tecnología general, ciencia
+
+CRITERIOS INTERNACIONAL (es_internacional = true):
+- Incidentes que ocurren FUERA de Perú (Colombia, Venezuela, EEUU, etc.)
+- Noticias sobre políticos/eventos de otros países sin víctimas peruanas
+- Operaciones militares/policiales de otros países
+- Aunque la fuente sea peruana, si el incidente NO ocurrió en Perú = internacional
+
+CRITERIOS ARTÍCULO DE RESUMEN (es_resumen = true):
+- Estadísticas anuales/mensuales ("en 2025 hubo X muertos", "incrementó en X%")
+- Balances o informes de un período ("total de crímenes en el año")
+- Conmemoraciones de eventos pasados ("recordará a las víctimas de...")
+- Rankings o comparativas históricas ("el año más letal para...")
+- Artículos de opinión/análisis sin incidente específico nuevo
+- Compilaciones de múltiples eventos ("los 10 casos más...")
+
+DEPARTAMENTOS DE PERÚ:
+Amazonas, Áncash, Apurímac, Arequipa, Ayacucho, Cajamarca, Callao, Cusco,
+Huancavelica, Huánuco, Ica, Junín, La Libertad, Lambayeque, Lima, Loreto,
+Madre de Dios, Moquegua, Pasco, Piura, Puno, San Martín, Tacna, Tumbes, Ucayali
+
+NOTICIA:
+Título: {title}
+Cuerpo: {body}
+Fuente: {source}
+
+Responde ÚNICAMENTE con JSON válido (sin markdown):
+{{
+    "es_relevante": true/false,
+    "es_internacional": true/false,
+    "es_resumen": true/false,
+    "tipo_evento": "categoria_exacta",
+    "subtipo": "descripción breve específica",
+    "muertos": número o null,
+    "heridos": número o null,
+    "victima_perfil": "perfil_exacto" o null,
+    "arma_usada": "tipo_arma_exacto" o null,
+    "departamento": "nombre exacto" o null,
+    "provincia": "nombre" o null,
+    "distrito": "nombre" o null,
+    "ubicacion_especifica": "lugar/dirección" o null,
+    "pais_evento": "Perú" o nombre del país donde ocurrió,
+    "actores": ["persona1", "persona2"] o [],
+    "organizaciones": ["org1", "org2"] o [],
+    "resumen_es": "resumen de 3-4 oraciones en español con los hechos principales",
+    "resumen_en": "summary in 3-4 sentences in English with the main facts",
+    "sentiment": "POS" o "NEG" o "NEU",
+    "confianza": 0.0-1.0
+}}"""
+
+
+
+# =============================================================================
+# VALID EVENT TYPES - For validation (ACLED-aligned)
+# =============================================================================
+
+TIPOS_EVENTO_VALIDOS = {
+    # ACLED: Battles
+    'violencia_armada',
+    
+    # ACLED: Violence Against Civilians
+    'crimen_violento',
+    'secuestro',
+    'feminicidio',
+    'extorsion',
+    'violencia_politica',
+    
+    # ACLED: Sexual Violence
+    'violencia_sexual',
+    
+    # ACLED: Protests
+    'protesta',
+    
+    # ACLED: Riots
+    'disturbio',
+    
+    # ACLED: Strategic Developments
+    'operativo_seguridad',
+    'terrorismo',
+    'corrupcion',
+    
+    # Peru-specific (not ACLED)
+    'crimen_organizado',
+    'accidente_grave',
+    'desastre_natural',
+    
+    # Other
+    'no_relevante'
+}
+
+
+# =============================================================================
+# M10: ACLED TAXONOMY MAPPING - English → Spanish tipos válidos
+# =============================================================================
+# The LLM sometimes returns ACLED taxonomy in English instead of our Spanish
+# tipos_evento. This mapping recovers relevant articles that would otherwise
+# be incorrectly marked as 'no_relevante'.
+#
+# Observed patterns in logs:
+# - "violence against civilians" → should be crimen_violento
+# - "protests" → should be protesta
+# - "strategic developments" → should be operativo_seguridad
+# - "sexual violence" → should be violencia_sexual
+# =============================================================================
+
+ACLED_TO_TIPOS = {
+    # =========================================================================
+    # VIOLENCE CATEGORIES
+    # =========================================================================
+    'violence against civilians': 'crimen_violento',
+    'violence_against_civilians': 'crimen_violento',
+    'attack': 'crimen_violento',
+    'sexual violence': 'violencia_sexual',
+    'sexual_violence': 'violencia_sexual',
+    'abduction/forced disappearance': 'secuestro',
+    'abduction': 'secuestro',
+    'forced disappearance': 'secuestro',
+    
+    # =========================================================================
+    # BATTLE CATEGORIES
+    # =========================================================================
+    'battles': 'violencia_armada',
+    'armed clash': 'violencia_armada',
+    'armed_clash': 'violencia_armada',
+    'government regains territory': 'operativo_seguridad',
+    'non-state actor overtakes territory': 'violencia_armada',
+    
+    # =========================================================================
+    # EXPLOSION/REMOTE VIOLENCE
+    # =========================================================================
+    'explosions/remote violence': 'terrorismo',
+    'explosions': 'terrorismo',
+    'remote violence': 'terrorismo',
+    'remote explosive/landmine/ied': 'terrorismo',
+    'remote explosive': 'terrorismo',
+    'landmine': 'terrorismo',
+    'ied': 'terrorismo',
+    'grenade': 'terrorismo',
+    'shelling/artillery/missile attack': 'terrorismo',
+    'shelling': 'terrorismo',
+    'artillery': 'terrorismo',
+    'missile attack': 'terrorismo',
+    'suicide bomb': 'terrorismo',
+    'air/drone strike': 'terrorismo',
+    
+    # =========================================================================
+    # PROTEST CATEGORIES
+    # =========================================================================
+    'protests': 'protesta',
+    'peaceful protest': 'protesta',
+    'peaceful_protest': 'protesta',
+    'protest with intervention': 'protesta',
+    'excessive force against protesters': 'disturbio',
+    
+    # =========================================================================
+    # RIOT CATEGORIES
+    # =========================================================================
+    'riots': 'disturbio',
+    'violent demonstration': 'disturbio',
+    'violent_demonstration': 'disturbio',
+    'mob violence': 'disturbio',
+    
+    # =========================================================================
+    # STRATEGIC DEVELOPMENTS
+    # =========================================================================
+    'strategic developments': 'operativo_seguridad',
+    'strategic_developments': 'operativo_seguridad',
+    'arrests': 'operativo_seguridad',
+    'arrest': 'operativo_seguridad',
+    'agreement': 'operativo_seguridad',
+    'change to group/activity': 'operativo_seguridad',
+    'headquarters or base established': 'operativo_seguridad',
+    'looting/property destruction': 'disturbio',
+    'looting': 'disturbio',
+    'property destruction': 'disturbio',
+    'disrupted weapons use': 'operativo_seguridad',
+    'other': 'operativo_seguridad',  # Generic strategic development
+}
+
+
+# =============================================================================
+# VALID VICTIM PROFILES - For validation (M5)
+# =============================================================================
+
+VICTIMA_PERFIL_VALIDOS = {
+    'comerciante',      # Store owners, vendors, small business owners
+    'transportista',    # Taxi, mototaxi, bus, truck drivers
+    'autoridad',        # Police, military, prosecutors, judges, public officials
+    'candidato',        # Political candidates
+    'periodista',       # Journalists, reporters, cameramen
+    'abogado',          # Lawyers, notaries
+    'empresario',       # Business executives, medium/large company owners
+    'estudiante',       # Students of any level
+    'mujer',            # Female victims (especially in gender-based violence)
+    'menor',            # Minors (children under 18)
+    'civil',            # Common citizens without specific profile
+    'desconocido',      # Profile cannot be determined
+    'no_aplica',        # No direct victims (operations, peaceful protests, etc.)
+}
+
+
+# =============================================================================
+# VALID WEAPON TYPES - For validation (M6)
+# =============================================================================
+
+ARMA_USADA_VALIDOS = {
+    'arma_fuego',        # Firearms: pistols, rifles, shotguns, automatic weapons
+    'arma_blanca',       # Bladed weapons: knives, machetes, razors
+    'objeto_contundente', # Blunt objects: bats, rocks, hammers
+    'explosivo',         # Explosives: bombs, grenades, dynamite
+    'vehiculo',          # Vehicle as weapon: intentional ramming
+    'fuego',             # Fire: arson, burns
+    'veneno',            # Poison: toxic substances, drugging
+    'ninguna',           # No weapon: strangulation, manual beating
+    'desconocida',       # Weapon not mentioned or cannot be determined
+    'no_aplica',         # No direct physical violence (protests, disasters, corruption)
+}
+
+
+# =============================================================================
+# ACLED CATEGORY MAPPING - For future ACLED export
+# =============================================================================
+
+ACLED_CATEGORY_MAP = {
+    # ACLED: Battles
+    'violencia_armada': {
+        'event_type': 'Battles',
+        'sub_event_type': 'Armed clash',
+        'description': 'Armed confrontations with exchange of fire'
+    },
+    
+    # ACLED: Violence Against Civilians
+    'crimen_violento': {
+        'event_type': 'Violence against civilians',
+        'sub_event_type': 'Attack',
+        'description': 'Murders, homicides, assassinations'
+    },
+    'secuestro': {
+        'event_type': 'Violence against civilians',
+        'sub_event_type': 'Abduction/forced disappearance',
+        'description': 'Kidnappings and forced disappearances'
+    },
+    'feminicidio': {
+        'event_type': 'Violence against civilians',
+        'sub_event_type': 'Attack',
+        'description': 'Gender-based killings of women'
+    },
+    'extorsion': {
+        'event_type': 'Violence against civilians',
+        'sub_event_type': 'Attack',
+        'description': 'Extortion and violent threats for money'
+    },
+    'violencia_politica': {
+        'event_type': 'Violence against civilians',
+        'sub_event_type': 'Attack',
+        'description': 'Attacks on political figures and candidates'
+    },
+    
+    # ACLED: Sexual Violence
+    'violencia_sexual': {
+        'event_type': 'Violence against civilians',
+        'sub_event_type': 'Sexual violence',
+        'description': 'Rape, sexual assault, sexual abuse'
+    },
+    
+    # ACLED: Protests
+    'protesta': {
+        'event_type': 'Protests',
+        'sub_event_type': 'Peaceful protest',
+        'description': 'Peaceful demonstrations and strikes'
+    },
+    
+    # ACLED: Riots
+    'disturbio': {
+        'event_type': 'Riots',
+        'sub_event_type': 'Violent demonstration',
+        'description': 'Violent protests, riots, looting'
+    },
+    
+    # ACLED: Strategic Developments
+    'operativo_seguridad': {
+        'event_type': 'Strategic developments',
+        'sub_event_type': 'Arrests',
+        'description': 'Police operations, arrests, raids'
+    },
+    'terrorismo': {
+        'event_type': 'Strategic developments',
+        'sub_event_type': 'Other',
+        'description': 'Terrorism-related incidents'
+    },
+    'corrupcion': {
+        'event_type': 'Strategic developments',
+        'sub_event_type': 'Other',
+        'description': 'Corruption investigations and arrests'
+    },
+    
+    # Peru-specific (not ACLED standard)
+    'crimen_organizado': {
+        'event_type': 'Other',
+        'sub_event_type': 'Organized crime (Peru-specific)',
+        'description': 'Drug trafficking, criminal organizations'
+    },
+    'accidente_grave': {
+        'event_type': 'Other',
+        'sub_event_type': 'Accident (Peru-specific)',
+        'description': 'Serious accidents with casualties'
+    },
+    'desastre_natural': {
+        'event_type': 'Other',
+        'sub_event_type': 'Natural disaster (Peru-specific)',
+        'description': 'Earthquakes, floods, landslides'
+    },
+    
+    'no_relevante': {
+        'event_type': 'Other',
+        'sub_event_type': 'Not relevant',
+        'description': 'Non-security related news'
+    }
+}
+
+
+# =============================================================================
+# THRESHOLDS - For quality validation
+# =============================================================================
+
+UMBRAL_MUERTOS_SOSPECHOSO = 15  # More than 15 deaths requires validation
+UMBRAL_HERIDOS_SOSPECHOSO = 80  # More than 80 injured requires validation

@@ -1,7 +1,11 @@
 """
 src/processing/normalize_newsapi_ai.py
+Last updated: 2026-01-16
+Description: Normalizes raw NewsAPI.ai articles to parquet for bronze_news.
 
-Normaliza artículos raw de NewsAPI.ai a formato parquet para bronze_news.
+M9 FIX: Added Unicode normalization to fix encoding issues
+- Converts \\uXXXX escapes to actual characters (á, é, ñ, etc.)
+- Applied to: title, body, source_title, location_label, concept_labels
 """
 from __future__ import annotations
 
@@ -13,6 +17,9 @@ from typing import Any, Dict, List
 
 import pandas as pd
 from loguru import logger
+
+# M9: Import text normalization utilities
+from src.utils.text_utils import normalize_unicode, normalize_list_unicode
 
 
 def utc_now_iso_z() -> str:
@@ -29,24 +36,31 @@ def safe_get(d: Dict[str, Any], path: List[str], default=None):
 
 
 def normalize_one_article(a: Dict[str, Any], meta: Dict[str, Any], run_id: str, file_name: str) -> Dict[str, Any]:
-    """Normaliza un artículo individual al esquema de bronze_news."""
+    """
+    Normalize a single article to bronze_news schema.
+    
+    M9: Applies Unicode normalization to all text fields to ensure
+    proper encoding of Spanish characters (á, é, í, ó, ú, ñ, etc.)
+    """
     uri = a.get("uri")
     url = a.get("url")
-    title = a.get("title")
-    body = a.get("body")
+    
+    # M9: Normalize title and body
+    title = normalize_unicode(a.get("title"))
+    body = normalize_unicode(a.get("body"))
 
     published_at = a.get("dateTimePub") or a.get("dateTime") or a.get("date")
     lang = a.get("lang")
 
-    # fuente
-    source_title = safe_get(a, ["source", "title"])
+    # M9: Normalize source title
+    source_title = normalize_unicode(safe_get(a, ["source", "title"]))
     source_uri = safe_get(a, ["source", "uri"])
 
-    # dedupe helpers desde RAW
+    # dedupe helpers from RAW
     is_duplicate = a.get("isDuplicate")
     original_uri = safe_get(a, ["originalArticle", "uri"])
 
-    # conceptos
+    # concepts - M9: normalize labels
     concepts = a.get("concepts") or []
     concept_uris, concept_labels = [], []
     if isinstance(concepts, list):
@@ -56,11 +70,12 @@ def normalize_one_article(a: Dict[str, Any], meta: Dict[str, Any], run_id: str, 
                     concept_uris.append(c.get("uri"))
                 lbl = c.get("label")
                 if isinstance(lbl, dict):
-                    concept_labels.append(lbl.get("spa") or lbl.get("eng"))
+                    label_text = lbl.get("spa") or lbl.get("eng")
+                    concept_labels.append(normalize_unicode(label_text))
                 elif isinstance(lbl, str):
-                    concept_labels.append(lbl)
+                    concept_labels.append(normalize_unicode(lbl))
 
-    # categorías
+    # categories - M9: normalize labels
     categories = a.get("categories") or []
     category_uris, category_labels = [], []
     if isinstance(categories, list):
@@ -70,19 +85,20 @@ def normalize_one_article(a: Dict[str, Any], meta: Dict[str, Any], run_id: str, 
                     category_uris.append(c.get("uri"))
                 lbl = c.get("label")
                 if isinstance(lbl, dict):
-                    category_labels.append(lbl.get("spa") or lbl.get("eng"))
+                    label_text = lbl.get("spa") or lbl.get("eng")
+                    category_labels.append(normalize_unicode(label_text))
                 elif isinstance(lbl, str):
-                    category_labels.append(lbl)
+                    category_labels.append(normalize_unicode(lbl))
 
-    # location
+    # location - M9: normalize location label
     location = a.get("location") if isinstance(a.get("location"), dict) else {}
     location_uri = location.get("uri")
     location_label = None
     lbl = location.get("label")
     if isinstance(lbl, dict):
-        location_label = lbl.get("spa") or lbl.get("eng")
+        location_label = normalize_unicode(lbl.get("spa") or lbl.get("eng"))
     elif isinstance(lbl, str):
-        location_label = lbl
+        location_label = normalize_unicode(lbl)
 
     lat = location.get("lat") or location.get("latitude")
     lon = location.get("lon") or location.get("longitude")
@@ -114,7 +130,7 @@ def normalize_one_article(a: Dict[str, Any], meta: Dict[str, Any], run_id: str, 
         "adm1": None,
         "adm2": None,
         "adm3": None,
-        # Columnas de tracking de ingesta
+        # Ingest tracking columns
         "ingest_run_id": run_id,
         "ingest_file": file_name,
     }
@@ -129,19 +145,21 @@ class NormalizeParams:
 
 def run_newsapi_ai_normalization(params: NormalizeParams) -> Path:
     """
-    Normaliza un archivo JSON raw de NewsAPI.ai a parquet.
+    Normalize a raw NewsAPI.ai JSON file to parquet.
+    
+    M9: Now includes Unicode normalization for all text fields.
     
     Args:
-        params: NormalizeParams con raw_path y out_dir
+        params: NormalizeParams with raw_path and out_dir
         
     Returns:
-        Path al archivo parquet generado
+        Path to generated parquet file
     """
     payload = json.loads(params.raw_path.read_text(encoding="utf-8"))
     meta = payload.get("meta", {})
     articles = payload.get("articles", [])
     
-    # Extraer run_id y file_name del path
+    # Extract run_id and file_name from path
     run_id = params.raw_path.stem  # e.g., "20260105010617"
     file_name = params.raw_path.name  # e.g., "20260105010617.json"
 
@@ -152,5 +170,5 @@ def run_newsapi_ai_normalization(params: NormalizeParams) -> Path:
     out_path = params.out_dir / (params.raw_path.stem + ".parquet")
     df.to_parquet(out_path, index=False)
 
-    logger.success(f"[INTERIM] Fichero generado: {out_path.as_posix()} (rows={len(df)})")
+    logger.success(f"[INTERIM] File generated: {out_path.as_posix()} (rows={len(df)})")
     return out_path

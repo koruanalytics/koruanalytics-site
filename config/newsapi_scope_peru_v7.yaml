@@ -1,9 +1,11 @@
-# =============================================================================
+﻿# =============================================================================
 # NewsAPI.ai Scope Configuration - Peru Elections 2026 v6.2
 # =============================================================================
 # STRATEGY: source_keywords_by_group
 # 
-# CHANGES v6.2:
+# CHANGES v7.0:
+# - Added GROUP 9: CORRUPTION (14 words) - Electoral context monitoring
+# - All other groups remain unchanged from v6.2
 # - Consolidated violencia_politica into single effective group
 # - Added violencia_sexual group
 # - Optimized keywords for better coverage
@@ -12,9 +14,9 @@
 # API LIMIT: NewsAPI.ai allows max 15 WORDS per query (not keywords!)
 # =============================================================================
 
-generated_at_utc: '2026-01-09T08:00:00Z'
+generated_at_utc: '2026-01-11T14:00:00Z'
 provider: newsapi.ai (EventRegistry)
-version: '6.2'
+version: '7.0'
 strategy: source_keywords_by_group
 
 # =============================================================================
@@ -203,8 +205,28 @@ keyword_groups:
       - victimas
       - heridos
       - fallecidos
-      
-# 
+  
+
+  # -------------------------------------------------------------------------
+  # GROUP 9: CORRUPTION - 14 words (NEW - Electoral context)
+  # -------------------------------------------------------------------------
+  - group_id: corrupcion
+    label: Corruption & Investigations
+    priority: 1
+    keywords:
+      - corrupcion
+      - soborno
+      - coima
+      - peculado
+      - malversacion
+      - lavado dinero
+      - enriquecimiento ilicito
+      - contraloria
+      - fiscalia
+      - detenido
+      - prision preventiva
+      - allanamiento
+
 # =============================================================================
 # QUERY CONFIGURATION
 # =============================================================================

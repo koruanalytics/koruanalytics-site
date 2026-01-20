@@ -1,0 +1,554 @@
+# =============================================================================
+# NewsAPI.ai Scope Configuration - Peru Elections 2026 v8.1
+# =============================================================================
+# STRATEGY: source_keywords_by_group aligned with ACLED taxonomy
+# 
+# CHANGES v8.1 (from v8.0):
+# - Expanded from 12 to 18 keyword groups for maximum coverage
+# - Maintains 6 ACLED categories with multiple subgroups per category
+# - Each group ≤15 WORDS for API compliance
+# - Recovers keywords lost in v8.0 to match/exceed v7 coverage
+# - Target: 330-360 articles/day (vs v7: 321, v8.0: 281)
+#
+# ACLED MAPPING (6 categories, 18 groups):
+# 1. BATTLES (2 groups): armed_clashes, armed_attacks
+# 2. VIOLENCE AGAINST CIVILIANS (6 groups): homicides, kidnapping, extortion, 
+#    gender_violence, electoral_violence, organized_crime
+# 3. SEXUAL VIOLENCE (1 group): sexual_violence
+# 4. PROTESTS (3 groups): labor_protests, social_protests, blockades
+# 5. RIOTS (1 group): riots
+# 6. STRATEGIC DEVELOPMENTS (3 groups): police_operations, terrorism, corruption
+# NON-ACLED (2 groups): natural_disasters, accidents
+#
+# API LIMIT: NewsAPI.ai allows max 15 WORDS per query (not keywords!)
+# =============================================================================
+
+generated_at_utc: '2026-01-17T18:30:00Z'
+provider: newsapi.ai (EventRegistry)
+version: '8.1'
+strategy: source_keywords_by_group
+
+# =============================================================================
+# PERUVIAN SOURCES (common for all groups)
+# =============================================================================
+source_uris:
+  - elcomercio.pe
+  - larepublica.pe
+  - diariocorreo.pe
+  - andina.pe
+  - gestion.pe
+  - rpp.pe
+  - ojo.pe
+
+# =============================================================================
+# KEYWORD GROUPS (18 groups, each ≤15 WORDS) - ACLED ALIGNED
+# =============================================================================
+
+keyword_groups:
+
+  # ===========================================================================
+  # ACLED CATEGORY 1: BATTLES (2 groups)
+  # ===========================================================================
+
+  # -------------------------------------------------------------------------
+  # GROUP 1: ARMED CLASHES - 15 words
+  # ACLED: Battles → Armed clash
+  # -------------------------------------------------------------------------
+  - group_id: armed_clashes
+    label: Armed Clashes and Shootouts
+    acled_event_type: Battles
+    acled_sub_event_type: Armed clash
+    priority: 1
+    keywords:
+      - balacera
+      - tiroteo
+      - baleado
+      - enfrentamiento armado
+      - fuego cruzado
+      - disparos
+      - rafaga
+      - intercambio disparos
+      - fusilamiento
+
+  # -------------------------------------------------------------------------
+  # GROUP 2: ARMED ATTACKS - 14 words
+  # ACLED: Battles → Armed clash
+  # -------------------------------------------------------------------------
+  - group_id: armed_attacks
+    label: Armed Attacks and Ambushes
+    acled_event_type: Battles
+    acled_sub_event_type: Armed clash
+    priority: 1
+    keywords:
+      - emboscada
+      - ataque armado
+      - ametrallamiento
+      - emboscada terrorista
+      - atentado armado
+      - francotirador
+      - asalto armado
+
+  # ===========================================================================
+  # ACLED CATEGORY 2: VIOLENCE AGAINST CIVILIANS (6 groups)
+  # ===========================================================================
+
+  # -------------------------------------------------------------------------
+  # GROUP 3: HOMICIDES - 15 words
+  # ACLED: Violence against civilians → Attack
+  # -------------------------------------------------------------------------
+  - group_id: homicides
+    label: Homicides and Assassinations
+    acled_event_type: Violence against civilians
+    acled_sub_event_type: Attack
+    priority: 1
+    keywords:
+      - asesinato
+      - homicidio
+      - sicariato
+      - sicario
+      - asesino
+      - ejecucion
+      - masacre
+      - victima
+      - muerto
+      - herido
+      - crimen
+      - criminal
+      - ajusticiamiento
+
+  # -------------------------------------------------------------------------
+  # GROUP 4: KIDNAPPING - 11 words
+  # ACLED: Violence against civilians → Abduction/forced disappearance
+  # -------------------------------------------------------------------------
+  - group_id: kidnapping
+    label: Kidnapping and Disappearances
+    acled_event_type: Violence against civilians
+    acled_sub_event_type: Abduction/forced disappearance
+    priority: 1
+    keywords:
+      - secuestro
+      - secuestrado
+      - plagio
+      - desaparicion forzada
+      - rapto
+      - raptado
+      - levanton
+      - desaparecido
+
+  # -------------------------------------------------------------------------
+  # GROUP 5: EXTORTION - 13 words
+  # ACLED: Violence against civilians → Attack
+  # -------------------------------------------------------------------------
+  - group_id: extortion
+    label: Extortion and Threats
+    acled_event_type: Violence against civilians
+    acled_sub_event_type: Attack
+    priority: 1
+    keywords:
+      - extorsion
+      - extorsionador
+      - cupo
+      - cobro cupo
+      - amenaza
+      - amenazado
+      - chantaje
+      - vacuna
+      - proteccion forzada
+
+  # -------------------------------------------------------------------------
+  # GROUP 6: GENDER VIOLENCE - 14 words
+  # ACLED: Violence against civilians → Attack
+  # -------------------------------------------------------------------------
+  - group_id: gender_violence
+    label: Gender-Based Violence
+    acled_event_type: Violence against civilians
+    acled_sub_event_type: Attack
+    priority: 1
+    keywords:
+      - feminicidio
+      - tentativa feminicidio
+      - violencia mujer
+      - violencia genero
+      - violencia pareja
+      - violencia familiar
+      - golpiza mujer
+      - agresion mujer
+
+  # -------------------------------------------------------------------------
+  # GROUP 7: ELECTORAL VIOLENCE - 15 words
+  # ACLED: Violence against civilians → Attack (electoral context)
+  # -------------------------------------------------------------------------
+  - group_id: electoral_violence
+    label: Electoral and Political Violence
+    acled_event_type: Violence against civilians
+    acled_sub_event_type: Attack
+    electoral_context: true
+    priority: 1
+    keywords:
+      - candidato asesinado
+      - candidato amenazado
+      - alcalde asesinado
+      - alcalde amenazado
+      - regidor asesinado
+      - congresista asesinado
+      - funcionario asesinado
+
+  # -------------------------------------------------------------------------
+  # GROUP 8: ORGANIZED CRIME - 15 words
+  # ACLED: Violence against civilians → Attack
+  # -------------------------------------------------------------------------
+  - group_id: organized_crime
+    label: Organized Crime
+    acled_event_type: Violence against civilians
+    acled_sub_event_type: Attack
+    priority: 1
+    keywords:
+      - narcotrafico
+      - narcotraficante
+      - banda criminal
+      - organizacion criminal
+      - mafia
+      - cartel
+      - droga
+      - cocaina
+      - PBC
+      - clan criminal
+      - red criminal
+
+  # ===========================================================================
+  # ACLED CATEGORY 3: SEXUAL VIOLENCE (1 group)
+  # ===========================================================================
+
+  # -------------------------------------------------------------------------
+  # GROUP 9: SEXUAL VIOLENCE - 15 words
+  # ACLED: Violence against civilians → Sexual violence
+  # -------------------------------------------------------------------------
+  - group_id: sexual_violence
+    label: Sexual Violence
+    acled_event_type: Violence against civilians
+    acled_sub_event_type: Sexual violence
+    priority: 1
+    keywords:
+      - violacion
+      - violador
+      - abuso sexual
+      - acoso sexual
+      - tocamientos
+      - trata personas
+      - prostitucion forzada
+      - pedofilia
+      - agresion sexual
+
+  # ===========================================================================
+  # ACLED CATEGORY 4: PROTESTS (3 groups)
+  # ===========================================================================
+
+  # -------------------------------------------------------------------------
+  # GROUP 10: LABOR PROTESTS - 15 words
+  # ACLED: Protests → Peaceful protest
+  # -------------------------------------------------------------------------
+  - group_id: labor_protests
+    label: Labor Strikes and Protests
+    acled_event_type: Protests
+    acled_sub_event_type: Peaceful protest
+    priority: 1
+    keywords:
+      - huelga
+      - paro
+      - paro nacional
+      - paro regional
+      - sindicato
+      - sindicalista
+      - trabajadores protesta
+      - docentes paro
+      - medicos paro
+
+  # -------------------------------------------------------------------------
+  # GROUP 11: SOCIAL PROTESTS - 15 words
+  # ACLED: Protests → Peaceful protest
+  # -------------------------------------------------------------------------
+  - group_id: social_protests
+    label: Social Protests and Demonstrations
+    acled_event_type: Protests
+    acled_sub_event_type: Peaceful protest
+    priority: 1
+    keywords:
+      - protesta
+      - manifestacion
+      - marcha
+      - movilizacion
+      - concentracion
+      - planton
+      - reclamo
+      - demanda social
+      - protesta pacifica
+      - protesta social
+
+  # -------------------------------------------------------------------------
+  # GROUP 12: BLOCKADES - 15 words
+  # ACLED: Protests → Peaceful protest
+  # -------------------------------------------------------------------------
+  - group_id: blockades
+    label: Blockades and Road Closures
+    acled_event_type: Protests
+    acled_sub_event_type: Peaceful protest
+    priority: 1
+    keywords:
+      - bloqueo
+      - bloqueo carretera
+      - carretera bloqueada
+      - via bloqueada
+      - cierre carretera
+      - tranque
+      - toma carretera
+      - bloqueo via
+
+  # ===========================================================================
+  # ACLED CATEGORY 5: RIOTS (1 group)
+  # ===========================================================================
+
+  # -------------------------------------------------------------------------
+  # GROUP 13: RIOTS - 15 words
+  # ACLED: Riots → Violent demonstration
+  # -------------------------------------------------------------------------
+  - group_id: riots
+    label: Violent Demonstrations and Riots
+    acled_event_type: Riots
+    acled_sub_event_type: Violent demonstration
+    priority: 1
+    keywords:
+      - disturbios
+      - enfrentamiento manifestantes
+      - vandalismo
+      - saqueo
+      - violencia protesta
+      - represion policial
+      - choque policia
+      - barricada
+      - desmanes
+      - protesta violenta
+
+  # ===========================================================================
+  # ACLED CATEGORY 6: STRATEGIC DEVELOPMENTS (3 groups)
+  # ===========================================================================
+
+  # -------------------------------------------------------------------------
+  # GROUP 14: POLICE OPERATIONS - 15 words
+  # ACLED: Strategic developments → Arrests
+  # -------------------------------------------------------------------------
+  - group_id: police_operations
+    label: Police Operations and Arrests
+    acled_event_type: Strategic developments
+    acled_sub_event_type: Arrests
+    priority: 1
+    keywords:
+      - detenido
+      - detencion
+      - captura
+      - capturado
+      - operativo policial
+      - allanamiento
+      - incautacion
+      - megaoperativo
+      - prision preventiva
+      - intervencion policial
+      - requisitoria
+
+  # -------------------------------------------------------------------------
+  # GROUP 15: TERRORISM - 15 words
+  # ACLED: Strategic developments → Other
+  # -------------------------------------------------------------------------
+  - group_id: terrorism
+    label: Terrorism and Subversive Activity
+    acled_event_type: Strategic developments
+    acled_sub_event_type: Other
+    priority: 1
+    keywords:
+      - terrorismo
+      - terrorista
+      - senderista
+      - VRAEM
+      - narcoterrorismo
+      - atentado terrorista
+      - Sendero Luminoso
+      - bomba
+      - explosivo
+      - dinamita
+      - detonacion
+      - subversivo
+
+  # -------------------------------------------------------------------------
+  # GROUP 16: CORRUPTION - 15 words
+  # ACLED: Strategic developments → Other
+  # -------------------------------------------------------------------------
+  - group_id: corruption
+    label: Corruption Investigations
+    acled_event_type: Strategic developments
+    acled_sub_event_type: Other
+    electoral_context: true
+    priority: 1
+    keywords:
+      - corrupcion
+      - corrupto
+      - soborno
+      - coima
+      - peculado
+      - malversacion
+      - lavado dinero
+      - enriquecimiento ilicito
+      - contraloria
+      - fiscalia anticorrupcion
+      - investigacion fiscal
+
+  # ===========================================================================
+  # NON-ACLED: PERU-SPECIFIC (2 groups)
+  # ===========================================================================
+
+  # -------------------------------------------------------------------------
+  # GROUP 17: NATURAL DISASTERS - 15 words
+  # Not ACLED standard - Peru-specific for electoral context
+  # -------------------------------------------------------------------------
+  - group_id: natural_disasters
+    label: Natural Disasters
+    acled_event_type: null
+    acled_sub_event_type: null
+    priority: 2
+    keywords:
+      - terremoto
+      - sismo
+      - temblor
+      - inundacion
+      - huayco
+      - deslizamiento
+      - derrumbe
+      - aluvion
+      - sequia
+      - helada
+      - friaje
+      - tsunami
+      - emergencia nacional
+
+  # -------------------------------------------------------------------------
+  # GROUP 18: ACCIDENTS - 15 words
+  # Not ACLED standard - Peru-specific (security context)
+  # -------------------------------------------------------------------------
+  - group_id: accidents
+    label: Serious Accidents
+    acled_event_type: null
+    acled_sub_event_type: null
+    priority: 2
+    keywords:
+      - accidente
+      - accidente grave
+      - choque
+      - choque multiple
+      - volcadura
+      - atropello
+      - incendio
+      - colision
+      - despiste
+      - naufragio
+      - ahogado
+      - tragedia
+      - victimas
+
+# =============================================================================
+# QUERY CONFIGURATION
+# =============================================================================
+query_config:
+  langs:
+    - spa
+    - eng
+  max_per_group: 80
+  max_total: 1000  # Increased for 18 groups (was 700 for 12 groups)
+  sort_by: date
+  dedupe_by: uri
+
+# =============================================================================
+# GEOGRAPHIC SCOPE
+# =============================================================================
+scope:
+  location_uri: http://en.wikipedia.org/wiki/Peru
+  country: Peru
+  country_code: PE
+
+# =============================================================================
+# ACLED EXPORT MAPPING (for future use)
+# =============================================================================
+acled_export_config:
+  enabled: true
+  version: ACLED_v11
+  
+  # Direct ACLED categories (1:1 mapping)
+  direct_mapping:
+    # BATTLES
+    armed_clashes: 
+      event_type: Battles
+      sub_event_type: Armed clash
+    armed_attacks:
+      event_type: Battles
+      sub_event_type: Armed clash
+    
+    # VIOLENCE AGAINST CIVILIANS
+    homicides:
+      event_type: Violence against civilians
+      sub_event_type: Attack
+    kidnapping:
+      event_type: Violence against civilians
+      sub_event_type: Abduction/forced disappearance
+    extortion:
+      event_type: Violence against civilians
+      sub_event_type: Attack
+    gender_violence:
+      event_type: Violence against civilians
+      sub_event_type: Attack
+    electoral_violence:
+      event_type: Violence against civilians
+      sub_event_type: Attack
+      notes: Electoral context
+    organized_crime:
+      event_type: Violence against civilians
+      sub_event_type: Attack
+    
+    # SEXUAL VIOLENCE
+    sexual_violence:
+      event_type: Violence against civilians
+      sub_event_type: Sexual violence
+    
+    # PROTESTS
+    labor_protests:
+      event_type: Protests
+      sub_event_type: Peaceful protest
+    social_protests:
+      event_type: Protests
+      sub_event_type: Peaceful protest
+    blockades:
+      event_type: Protests
+      sub_event_type: Peaceful protest
+    
+    # RIOTS
+    riots:
+      event_type: Riots
+      sub_event_type: Violent demonstration
+    
+    # STRATEGIC DEVELOPMENTS
+    police_operations:
+      event_type: Strategic developments
+      sub_event_type: Arrests
+    terrorism:
+      event_type: Strategic developments
+      sub_event_type: Other
+      notes: Terrorism-related
+    corruption:
+      event_type: Strategic developments
+      sub_event_type: Other
+      notes: Corruption investigations
+  
+  # Peru-specific categories (not in ACLED standard)
+  peru_specific:
+    natural_disasters:
+      export: false
+      reason: Not in ACLED taxonomy
+    accidents:
+      export: false
+      reason: Not security-related per ACLED

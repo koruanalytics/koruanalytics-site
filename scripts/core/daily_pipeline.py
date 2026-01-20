@@ -51,7 +51,7 @@ load_dotenv()
 # =============================================================================
 
 DB_PATH = "data/osint_dw.duckdb"
-SCOPE_PATH = "config/newsapi_scope_peru_v6.yaml"  # v6: source + keywords BY GROUP
+SCOPE_PATH = "config/newsapi_scope_peru_v7_acled.yaml"  # v7.1: source + v7 + Metadata ACLED
 RAW_DIR = "data/raw/newsapi_ai"
 INTERIM_DIR = "data/interim/newsapi_ai"
 

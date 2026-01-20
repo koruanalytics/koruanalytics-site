@@ -1,0 +1,56 @@
+"""
+src/llm_providers - Multi-provider LLM abstraction layer.
+
+Supports:
+- Anthropic Claude (local development)
+- Azure OpenAI (production)
+
+Quick Start:
+    from src.llm_providers import get_llm_client
+    
+    # Uses LLM_PROVIDER env var to select provider
+    client = get_llm_client()
+    result = client.enrich_article(title, body, source)
+    
+    # Check usage
+    stats = client.get_stats()
+    print(f"Cost: ${stats['cost_usd']}")
+
+Configuration (.env):
+    # For local development (Anthropic)
+    LLM_PROVIDER=anthropic
+    ANTHROPIC_API_KEY=sk-ant-...
+    
+    # For Azure production
+    LLM_PROVIDER=azure_openai
+    AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com/
+    AZURE_OPENAI_API_KEY=your-key
+    AZURE_OPENAI_DEPLOYMENT=gpt-4o-mini
+"""
+
+from .base import BaseLLMProvider, LLMResponse
+from .factory import get_llm_client, get_provider_info
+from .prompts import (
+    ENRICHMENT_PROMPT, 
+    TIPOS_EVENTO_VALIDOS, 
+    VICTIMA_PERFIL_VALIDOS, 
+    ARMA_USADA_VALIDOS,
+    ACLED_TO_TIPOS  # M10: ACLED English → Spanish mapping
+)
+
+__all__ = [
+    # Main factory
+    "get_llm_client",
+    "get_provider_info",
+    
+    # Base classes
+    "BaseLLMProvider",
+    "LLMResponse",
+    
+    # Prompts
+    "ENRICHMENT_PROMPT",
+    "TIPOS_EVENTO_VALIDOS",
+    "VICTIMA_PERFIL_VALIDOS",
+    "ARMA_USADA_VALIDOS",
+    "ACLED_TO_TIPOS",  # M10
+]
