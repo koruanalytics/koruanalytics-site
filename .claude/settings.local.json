@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(magick:*)",
-      "Bash(python create_og_image.py:*)"
+      "Bash(python create_og_image.py:*)",
+      "Bash(git push:*)"
     ]
   }
 }
