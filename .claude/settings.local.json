@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(magick:*)",
+      "Bash(python create_og_image.py:*)"
+    ]
+  }
+}
